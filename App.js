@@ -1,5 +1,4 @@
 import "react-native-url-polyfill/auto";
-import "react-native-gesture-handler";
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
