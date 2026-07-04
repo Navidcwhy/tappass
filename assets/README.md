@@ -17,5 +17,6 @@ Krav (annars avvisas uppladdningen — ITMS-90022 / ITMS-90717):
 Nuvarande TapPass-symbol (lime cirkel + två svarta radarbågar) fungerar bra
 — exportera den bara på solid bakgrund i 1024×1024 utan transparens.
 
-> Filen är avsiktligt inte incheckad ännu; leverera den och committa så är
-> ikon-steget klart.
+> ✅ `icon.png` är incheckad (1024×1024, RGB utan alfakanal) — genererad från
+> TapPass-designen. Byt bara ut filen om loggan uppdateras; behåll exakt
+> samma format.

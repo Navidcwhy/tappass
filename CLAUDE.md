@@ -94,15 +94,14 @@ Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `caf
 
 ## Kända begränsningar
 
-- **Ingen iOS-release publicerad ännu** — men koden är iOS-förberedd (se iOS-sektionen): SDK 54, plattformsgrenad NFC, ikon-referens. Återstår: leverera ikonfil, AASA-fil på tappass.se, EAS-bygge med Apple-credentials.
+- **Ingen iOS-release publicerad ännu** — men koden är iOS-förberedd (se iOS-sektionen): SDK 54, plattformsgrenad NFC, ikon incheckad. Återstår: AASA-fil på tappass.se, EAS-bygge med Apple-credentials.
 - Typsnitt laddas i runtime från fonts.gstatic.com (`theme.js`) — första start utan nät ger systemfont.
-- App-ikon: `app.json` pekar på `./assets/icon.png` men filen är inte incheckad ännu — måste levereras (1024×1024, ingen alfakanal) innan ett App Store-bygge.
 - `device_id`-identiteten överlever inte ominstallation.
 - Ingen test-/lint-infrastruktur; verifiering sker manuellt på fysisk enhet med NFC (JS-nivå kan sanity-checkas med babel-transform).
 
 ## iOS-release
 
-> Status 2026-07: appen är Android-testad och nu iOS-förberedd i kod. App Store Connect-metadata, screenshots och previews finns redan (sv + en). Kvar innan inskickning: ikonfil, AASA-fil på tappass.se, samt EAS-bygge (kräver Apple-credentials + nätåtkomst till Expo — kan inte göras från denna sandbox).
+> Status 2026-07: appen är Android-testad och nu iOS-förberedd i kod, med ikon incheckad. App Store Connect-metadata, screenshots och previews finns redan (sv + en). Kvar innan inskickning: AASA-fil på tappass.se samt EAS-bygge (kräver Apple-credentials + nätåtkomst till Expo — kan inte göras från denna sandbox).
 
 ### Fasta identiteter
 
@@ -113,7 +112,7 @@ Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `caf
 ### Blockerare — status
 
 1. ✅ **SDK-uppgradering klar.** Expo SDK 51→54, RN 0.74.5→0.81.5, React 18→19. `newArchEnabled: false` behålls (SDK 54 är sista med legacy arch; nfc-manager v3 stödjer inte New Architecture). Bakgrund: Apple kräver Xcode 26/iOS 26 SDK för alla uppladdningar sedan 28 april 2026.
-2. ⏳ **App-ikon:** `app.json` pekar nu på `./assets/icon.png`, men filen måste levereras (1024×1024, ingen alfakanal) innan bygge — annars ITMS-90022. Se `assets/README.md`.
+2. ✅ **App-ikon incheckad** på `assets/icon.png` (1024×1024 PNG, RGB utan alfakanal) och refererad i `app.json`. Byts filen ut måste exakt samma format behållas — annars ITMS-90022/90717. Se `assets/README.md`.
 3. ✅ **NFC plattformsgrenad** (se nästa avsnitt).
 
 ### NFC på iOS (implementerat)
@@ -149,4 +148,4 @@ Första iOS-bygget frågar efter Apple-inloggning (eller App Store Connect API-n
 - [ ] Efter `eas submit`: välj builden under versionen i App Store Connect, besvara exportkryptering (eller sätt `ITSAppUsesNonExemptEncryption: false` i `app.json` i förväg)
 - [ ] Se till att tappass.se serverar AASA-filen på `/.well-known/apple-app-site-association` (görs i Lovable-projektet, inte i detta repo)
 - [ ] Skriv om fysiska NFC-taggar till URL-records (`https://tappass.se/t/<token>`) — krävs för att iOS bakgrundsläsning ska fungera alls
-- [ ] Leverera en app-ikon (1024×1024 PNG, ingen alfakanal) till `assets/icon.png` och peka `app.json` dit
+- [x] App-ikon incheckad på `assets/icon.png` (1024×1024 PNG, ingen alfakanal)
