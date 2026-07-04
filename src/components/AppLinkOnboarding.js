@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, Modal, ScrollView, Animated, Easing, Linking } from "react-native";
+import { View, Text, Pressable, Modal, ScrollView, Animated, Easing, Linking, Platform } from "react-native";
 import * as Haptics from "expo-haptics";
 import { T, RADIUS, FONT } from "../lib/theme";
 import { Icon } from "../lib/icons";
 
-const STEPS = [
+// Android needs the user to opt the app in as the default handler for
+// tappass.se links so a tag tap auto-opens the app.
+const ANDROID_STEPS = [
   {
     label: "STEG 1 / 4",
     title: "En sista sak innan magin funkar.",
@@ -35,6 +37,34 @@ const STEPS = [
     icon: "scan",
   },
 ];
+
+// iOS has no "default handler" setting — Universal Links open the app
+// automatically once set up, and scanning is done from the Skanna-button.
+const IOS_STEPS = [
+  {
+    label: "STEG 1 / 3",
+    title: "Så funkar TapPass.",
+    body: "Samla stämplar hos anslutna caféer. En full rad ger en belöning som personalen löser in med en kod.",
+    cta: "Visa hur",
+    icon: "sparkles",
+  },
+  {
+    label: "STEG 2 / 3",
+    title: "Tryck på Skanna och håll mot stämpeln.",
+    body: "Tryck på \"Skanna stämpel\" och håll toppen av iPhonen mot TapPass-plattan i kassan. iOS visar ett skanningsfönster — håll kvar tills det bekräftar.",
+    cta: "Uppfattat",
+    icon: "scan",
+  },
+  {
+    label: "STEG 3 / 3",
+    title: "Du är redo.",
+    body: "Har butiken en länkad platta räcker det ofta att tappa telefonen mot den för att öppna appen direkt. Annars använder du Skanna-knappen.",
+    cta: "Kom igång",
+    icon: "check",
+  },
+];
+
+const STEPS = Platform.OS === "ios" ? IOS_STEPS : ANDROID_STEPS;
 
 export default function AppLinkOnboarding({ visible, onClose }) {
   const [step, setStep] = useState(0);

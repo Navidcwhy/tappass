@@ -7,6 +7,7 @@
     "userInterfaceStyle": "light",
     "scheme": "tappass",
     "newArchEnabled": false,
+    "icon": "./assets/icon.png",
     "android": {
       "package": "se.tappass.app",
       "permissions": ["NFC", "android.permission.NFC"],
@@ -27,7 +28,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "se.tappass.app",
       "infoPlist": {
-        "NFCReaderUsageDescription": "TapPass läser anslutna butikers NFC-taggar för att lägga till stämplar på dina kort."
+        "NFCReaderUsageDescription": "TapPass läser anslutna butikers NFC-taggar för att lägga till stämplar på dina kort.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "associatedDomains": ["applinks:tappass.se", "applinks:www.tappass.se"]
     },
