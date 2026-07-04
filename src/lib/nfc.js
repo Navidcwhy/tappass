@@ -1,4 +1,7 @@
+import { Platform } from "react-native";
 import NfcManager, { NfcTech, Ndef } from "react-native-nfc-manager";
+
+export const IS_IOS = Platform.OS === "ios";
 
 let started = false;
 
@@ -15,8 +18,13 @@ export async function isNfcEnabled() {
   try { return await NfcManager.isEnabled(); } catch { return false; }
 }
 
-export async function readToken() {
-  await NfcManager.requestTechnology(NfcTech.Ndef);
+// On iOS every requestTechnology call presents the system "Ready to Scan"
+// sheet; alertMessage is the instruction text shown on it (ignored on Android).
+export async function readToken({ alertMessage } = {}) {
+  await NfcManager.requestTechnology(
+    NfcTech.Ndef,
+    alertMessage ? { alertMessage } : undefined
+  );
   const tag = await NfcManager.getTag();
   const records = (tag && tag.ndefMessage) || [];
   for (const r of records) {
@@ -40,4 +48,19 @@ export async function readToken() {
 
 export async function cancelNfc() {
   try { await NfcManager.cancelTechnologyRequest(); } catch {}
+}
+
+// Update the text on the iOS scan sheet before it closes (no-op on Android).
+export async function setIosAlert(message) {
+  if (!IS_IOS) return;
+  try { await NfcManager.setAlertMessageIOS(message); } catch {}
+}
+
+// True when the thrown NFC error is a user-cancel or session timeout rather
+// than a genuine read failure. iOS surfaces these as a code, not a message.
+export function isCancelOrTimeout(e) {
+  const code = e && (e.code || e.name);
+  if (typeof code === "string" && /cancel|timeout|invalidat|userCancel|session/i.test(code)) return true;
+  const msg = (e && e.message) || "";
+  return /cancel|timeout|invalidat|session was invalidated/i.test(msg);
 }

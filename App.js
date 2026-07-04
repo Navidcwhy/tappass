@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -9,8 +9,9 @@ import * as Linking from "expo-linking";
 import { T, RADIUS, FONT, FONTS_URL } from "./src/lib/theme";
 import { Icon, CafeIcon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
-import { initNfc, readToken, cancelNfc } from "./src/lib/nfc";
+import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
 import { tapToken, saveReward, redeemReward, loadWallet, loadCafes } from "./src/lib/supabase";
+import { hasOnboarded, markOnboarded } from "./src/lib/prefs";
 import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
@@ -83,9 +84,12 @@ export default function App() {
       walletRows.forEach((row) => { const card = normalizeCard(row); w[card.slug] = card; });
       setWallet(w);
       setReady(true);
-      setTimeout(() => setShowOnboarding(true), 1500);
+      // Show the intro only on the first launch, not on every start.
+      if (!(await hasOnboarded())) setTimeout(() => setShowOnboarding(true), 1500);
     })();
   }, []);
+
+  const closeOnboarding = useCallback(() => { setShowOnboarding(false); markOnboarded(); }, []);
 
   const onLayoutReady = useCallback(() => { if (ready) SplashScreen.hideAsync().catch(() => {}); }, [ready]);
 
@@ -205,7 +209,7 @@ export default function App() {
 
         <RewardSheet visible={!!rewardCard} card={rewardCard} onClose={() => setRewardId(null)} onRedeemed={onRedeemed} />
         <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} onSave={onSaveReward} onRedeemNow={onRedeemNow} />
-        <AppLinkOnboarding visible={showOnboarding} onClose={() => setShowOnboarding(false)} />
+        <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -283,7 +287,23 @@ function HomeWithScanner({ nfc, pendingCards, progressCards, totalStamps, onSimu
   );
 }
 
+// iOS Core NFC has no silent foreground reading: every requestTechnology call
+// shows the system "Ready to Scan" sheet, so a background loop is impossible.
+// Platform-branch: Android keeps the passive loop, iOS uses a button that runs
+// exactly one scan session per tap.
 function LiveScanner({ nfc, onSendTap }) {
+  return Platform.OS === "ios"
+    ? <IosScanner nfc={nfc} onSendTap={onSendTap} />
+    : <AndroidScanner nfc={nfc} onSendTap={onSendTap} />;
+}
+
+// Token can be either a slug ("miyabi") or a full token ("miyabi-01").
+// Backend handles both, but our DB uses "<slug>-01" format.
+function normalizeToken(token) {
+  return token.includes("-") ? token : token + "-01";
+}
+
+function AndroidScanner({ nfc, onSendTap }) {
   const [err, setErr] = useState("");
   const mountedRef = useRef(true);
   const loopGuardRef = useRef(0);
@@ -302,15 +322,9 @@ function LiveScanner({ nfc, onSendTap }) {
       try {
         const token = await readToken();
         if (cancelled || !mountedRef.current) return;
-        if (token) {
-          // Token can be either a slug ("miyabi") or a full token ("miyabi-01")
-          // Backend handles both — but our DB uses "<slug>-01" format
-          const normalized = token.includes("-") ? token : token + "-01";
-          await onSendTap(normalized);
-        }
+        if (token) await onSendTap(normalizeToken(token));
       } catch (e) {
-        const msg = (e && e.message) || "";
-        if (!/cancel/i.test(msg)) setErr("Läsfel — håll stilla nästa gång.");
+        if (!isCancelOrTimeout(e)) setErr("Läsfel — håll stilla nästa gång.");
       } finally {
         await cancelNfc();
         if (!cancelled && mountedRef.current) {
@@ -337,6 +351,82 @@ function LiveScanner({ nfc, onSendTap }) {
         </Text>
       </View>
       {!!err && <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.warn, marginTop: 6 }}>{err}</Text>}
+    </View>
+  );
+}
+
+function IosScanner({ nfc, onSendTap }) {
+  const [scanning, setScanning] = useState(false);
+  const [err, setErr] = useState("");
+  const scanningRef = useRef(false);
+
+  useEffect(() => () => { cancelNfc(); }, []);
+
+  const onScan = async () => {
+    if (scanningRef.current || nfc.supported === false) return;
+    scanningRef.current = true;
+    setScanning(true);
+    setErr("");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      const token = await readToken({ alertMessage: "Håll toppen av iPhonen mot TapPass-stämpeln" });
+      if (token) {
+        await setIosAlert("Stämpel läst");
+        await cancelNfc();
+        await onSendTap(normalizeToken(token));
+      } else {
+        await cancelNfc();
+        setErr("Ingen TapPass-tagg hittades. Försök igen.");
+      }
+    } catch (e) {
+      await cancelNfc();
+      if (!isCancelOrTimeout(e)) setErr("Läsfel — försök igen.");
+    } finally {
+      scanningRef.current = false;
+      setScanning(false);
+    }
+  };
+
+  const unsupported = nfc.supported === false;
+
+  return (
+    <View style={{ paddingTop: 18, paddingBottom: 24, alignItems: "center" }}>
+      <Radar enabled={scanning} />
+      <Text style={{ fontFamily: FONT.display, fontSize: 26, color: T.ink, marginTop: 18, textAlign: "center" }}>
+        {unsupported ? "NFC stöds inte" : scanning ? "Skannar…" : "Skanna en stämpel"}
+      </Text>
+      <Text style={{ fontFamily: FONT.ui, fontSize: 13, color: T.inkMute, marginTop: 6, textAlign: "center", maxWidth: 280, lineHeight: 19 }}>
+        {unsupported
+          ? "Den här enheten saknar NFC-läsare."
+          : "Tryck på knappen och håll toppen av telefonen mot stämpeln i kassan."}
+      </Text>
+
+      {!unsupported && (
+        <Pressable
+          onPress={onScan}
+          disabled={scanning}
+          style={({ pressed }) => ({
+            marginTop: 22,
+            backgroundColor: T.ink,
+            paddingHorizontal: 26,
+            paddingVertical: 15,
+            borderRadius: RADIUS.pill,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            opacity: scanning ? 0.6 : pressed ? 0.85 : 1,
+          })}
+        >
+          {scanning
+            ? <ActivityIndicator size="small" color="#fff" />
+            : <Icon name="scan" size={20} color="#fff" strokeWidth={2} />}
+          <Text style={{ fontFamily: FONT.uiBold, fontSize: 15, color: "#fff", letterSpacing: 0.3 }}>
+            {scanning ? "Håll mot taggen…" : "Skanna stämpel"}
+          </Text>
+        </Pressable>
+      )}
+
+      {!!err && <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.warn, marginTop: 12, textAlign: "center" }}>{err}</Text>}
     </View>
   );
 }
