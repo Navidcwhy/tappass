@@ -22,6 +22,7 @@ Webben ligger *inte* här:
 | Lagring | AsyncStorage (endast anonymt `device_id`) |
 | UI | Egna komponenter, `lucide-react-native`-ikoner, `Animated` (core) + reanimated-plugin i babel |
 | Bygg | EAS Build (projectId i `app.json`), profiler i `eas.json` |
+| OTA | EAS Update (`expo-updates`): JS-ändringar pushas till användare utan App Store-granskning. `runtimeVersion.policy: "appVersion"` — OTA når alla builds med samma `expo.version`. Kanaler: `production`/`preview` (eas.json) |
 
 Ingen TypeScript, ingen linter, inga tester, ingen CI. Ren JavaScript med inline-styles.
 
@@ -139,7 +140,12 @@ eas build --platform ios --profile production
 
 # Ladda upp till App Store Connect:
 eas submit --platform ios --latest
+
+# OTA-uppdatering (endast JS/asset-ändringar — native-/beroendeändringar kräver nytt bygge):
+eas update --channel production --message "kort beskrivning"
 ```
+
+**OTA-regler:** `eas update` når alla installerade appar med samma `expo.version` (runtimeVersion-policy `appVersion`). Höjs `expo.version`, eller ändras native-kod/beroenden/plugins, krävs nytt EAS-bygge + App Store-inskickning. Appen hämtar uppdateringen vid nästa kallstart (default: två starter innan den syns).
 
 **Projektåtkomst:** EAS-projektet (`57aff16d…`, slug `tappass`) måste ägas av/delas med det Expo-konto som bygger — kontot måste vara medlem i ägar-organisationen (t.ex. `tappass-org`). Verifiera med `eas project:info` i repo-roten; "You don't have access" ⇒ be ägaren flytta projektet (Project settings → Transfer project) eller bjuda in dig.
 

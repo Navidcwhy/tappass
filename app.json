@@ -8,6 +8,12 @@
     "scheme": "tappass",
     "newArchEnabled": false,
     "icon": "./assets/icon.png",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/57aff16d-689b-4bed-aa1b-cd166bfc0f83"
+    },
     "android": {
       "package": "se.tappass.app",
       "permissions": ["NFC", "android.permission.NFC"],
