@@ -36,7 +36,10 @@
     "plugins": [
       [
         "react-native-nfc-manager",
-        { "nfcPermission": "TapPass behöver NFC för att läsa butikens stämpelplatta." }
+        {
+          "nfcPermission": "TapPass behöver NFC för att läsa butikens stämpelplatta.",
+          "includeNdefEntitlement": false
+        }
       ]
     ],
     "extra": {
