@@ -16,6 +16,7 @@ import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
+import BrandMark from "./src/components/BrandMark";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -219,6 +220,7 @@ function Header({ onSettings, loading }) {
   return (
     <View style={{ paddingHorizontal: 22, paddingTop: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <BrandMark size={26} />
         <Text style={{ fontFamily: FONT.display, fontSize: 24, color: T.ink }}>TapPass</Text>
         {loading && <ActivityIndicator size="small" color={T.inkMute} />}
       </View>
@@ -391,7 +393,13 @@ function IosScanner({ nfc, onSendTap }) {
 
   return (
     <View style={{ paddingTop: 18, paddingBottom: 24, alignItems: "center" }}>
-      <Radar enabled={scanning} />
+      {scanning
+        ? <Radar enabled />
+        : (
+          <View style={{ height: 144, alignItems: "center", justifyContent: "center" }}>
+            <BrandMark size={112} animated strokeWidth={9} />
+          </View>
+        )}
       <Text style={{ fontFamily: FONT.display, fontSize: 26, color: T.ink, marginTop: 18, textAlign: "center" }}>
         {unsupported ? "NFC stöds inte" : scanning ? "Skannar…" : "Skanna en stämpel"}
       </Text>
