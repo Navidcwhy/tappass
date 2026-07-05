@@ -3,6 +3,7 @@ import { View, Text, Pressable, Modal, ScrollView, Animated, Easing, Linking, Pl
 import * as Haptics from "expo-haptics";
 import { T, RADIUS, FONT } from "../lib/theme";
 import { Icon } from "../lib/icons";
+import BrandMark from "./BrandMark";
 
 // Android needs the user to opt the app in as the default handler for
 // tappass.se links so a tag tap auto-opens the app.
@@ -71,13 +72,16 @@ export default function AppLinkOnboarding({ visible, onClose }) {
   const slide = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (visible) { setStep(0); slide.setValue(0); }
+    if (visible) setStep(0);
   }, [visible]);
 
+  // Körs även när modalen öppnas (inte bara vid stegbyte) — annars startar
+  // intoningen aldrig för steg 1 och innehållet fastnar på opacity 0.
   useEffect(() => {
+    if (!visible) return;
+    slide.setValue(0);
     Animated.spring(slide, { toValue: 1, friction: 8, tension: 60, useNativeDriver: true }).start();
-    return () => slide.setValue(0);
-  }, [step]);
+  }, [step, visible]);
 
   if (!visible) return null;
   const s = STEPS[step];
@@ -105,9 +109,11 @@ export default function AppLinkOnboarding({ visible, onClose }) {
           <Animated.View style={{ flex: 1, opacity: slide, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
             <Text style={{ fontFamily: FONT.uiBold, fontSize: 11, color: T.accent, letterSpacing: 2 }}>{s.label}</Text>
 
-            {/* Icon badge */}
+            {/* Icon badge — loggan på första steget, lucide-ikoner på övriga */}
             <View style={{ marginTop: 36, width: 84, height: 84, borderRadius: 42, backgroundColor: "rgba(184,214,53,.12)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(184,214,53,.3)" }}>
-              <Icon name={s.icon} size={38} color={T.accent} strokeWidth={1.6} />
+              {step === 0
+                ? <BrandMark size={46} animated arcColor="#fff" dotColor={T.accent} />
+                : <Icon name={s.icon} size={38} color={T.accent} strokeWidth={1.6} />}
             </View>
 
             <Text style={{ fontFamily: FONT.display, fontSize: 36, color: "#fff", lineHeight: 40, marginTop: 28 }}>{s.title}</Text>
