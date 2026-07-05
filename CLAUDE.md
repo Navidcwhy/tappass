@@ -61,14 +61,15 @@ Expo Go fungerar **inte** (NFC kräver native-modul). Du behöver en dev client:
 
 ```bash
 npm install
+npm install -g eas-cli   # EAS CLI heter eas-cli på npm — `npx eas` fungerar INTE
 
 # Android – lokalt (kräver Android Studio + Java 17 + USB-debug):
 npx expo run:android
 # …eller i molnet:
-npx eas build --profile development --platform android
+eas build --profile development --platform android
 
 # iOS – dev client (kräver Apple-konto kopplat till EAS; se iOS-sektionen):
-npx eas build --profile development --platform ios
+eas build --profile development --platform ios
 
 # Starta utvecklingsservern (hot reload i dev clienten):
 npm start
@@ -130,12 +131,17 @@ iOS Core NFC skiljer sig fundamentalt från Android. Läsningen sker i `src/lib/
 ### Byggkommandon
 
 ```bash
+npm install -g eas-cli   # engångs; `npx eas` fungerar INTE (fel paket på npm)
+eas login                # Expo-konto med åtkomst till projektet (se nedan)
+
 # Produktion (.ipa för App Store):
-npx eas build --platform ios --profile production
+eas build --platform ios --profile production
 
 # Ladda upp till App Store Connect:
-npx eas submit --platform ios --latest
+eas submit --platform ios --latest
 ```
+
+**Projektåtkomst:** EAS-projektet (`57aff16d…`, slug `tappass`) måste ägas av/delas med det Expo-konto som bygger — kontot måste vara medlem i ägar-organisationen (t.ex. `tappass-org`). Verifiera med `eas project:info` i repo-roten; "You don't have access" ⇒ be ägaren flytta projektet (Project settings → Transfer project) eller bjuda in dig.
 
 Första iOS-bygget frågar efter Apple-inloggning (eller App Store Connect API-nyckel) för att skapa distributionscertifikat + provisioning profile — det steget kan bara kontoägaren göra.
 
