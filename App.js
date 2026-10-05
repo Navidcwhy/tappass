@@ -6,12 +6,13 @@ import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
-import { T, RADIUS, FONT, FONTS_URL } from "./src/lib/theme";
+import { T, RADIUS, FONT, FONT_FILES } from "./src/lib/theme";
 import { Icon, CafeIcon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
 import { tapToken, saveReward, redeemReward, loadWallet, loadCafes } from "./src/lib/supabase";
 import { hasOnboarded, markOnboarded } from "./src/lib/prefs";
+import { readCache, writeCache } from "./src/lib/cache";
 import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
@@ -49,6 +50,16 @@ function normalizeCard({ cafe, stamps, pending }) {
   };
 }
 
+function walletFromRows(rows) {
+  const w = {};
+  rows.forEach((row) => { const card = normalizeCard(row); w[card.slug] = card; });
+  return w;
+}
+
+// Upper bound for the local-only startup work (bundled fonts, native NFC start,
+// AsyncStorage). Network is never part of it.
+const LOCAL_BOOT_CAP_MS = 2000;
+
 function tokenFromUrl(url) {
   if (!url) return null;
   try {
@@ -61,6 +72,9 @@ function tokenFromUrl(url) {
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [synced, setSynced] = useState(false);   // first backend refresh finished (ok or failed)
+  const [fontEpoch, setFontEpoch] = useState(0);
+  const syncedRef = useRef(false);
   const [wallet, setWallet] = useState({});      // slug -> card
   const [allCafes, setAllCafes] = useState([]);  // for discover tab + simulate
   const [tab, setTab] = useState("home");
@@ -74,21 +88,51 @@ export default function App() {
 
   const nfc = useNfcStatus();
 
-  // Initial load: fonts, NFC, cafes, wallet
+  // Startup. The splash must only wait for LOCAL work (bundled fonts, NFC start,
+  // cached wallet from AsyncStorage). Supabase is refreshed in the background —
+  // before this, the splash stayed up through font downloads + two network calls.
   useEffect(() => {
+    const applyCache = (c) => {
+      if (!c || syncedRef.current) return;   // never overwrite fresher backend data
+      setAllCafes(c.cafes);
+      setWallet(c.wallet);
+    };
+
     (async () => {
-      try { await Font.loadAsync(FONTS_URL); } catch {}
-      await initNfc();
-      const [cafes, walletRows] = await Promise.all([loadCafes(), loadWallet()]);
-      setAllCafes(cafes.map(normalizeCafe));
-      const w = {};
-      walletRows.forEach((row) => { const card = normalizeCard(row); w[card.slug] = card; });
-      setWallet(w);
+      const local = Promise.all([
+        Font.loadAsync(FONT_FILES).catch(() => {}),
+        initNfc(),
+        readCache(),
+      ]).then(([, , cache]) => cache);
+
+      const first = await Promise.race([
+        local,
+        new Promise((resolve) => setTimeout(() => resolve("timeout"), LOCAL_BOOT_CAP_MS)),
+      ]);
+      if (first === "timeout") {
+        local.then((c) => { applyCache(c); setFontEpoch((e) => e + 1); });   // late: re-render with fonts
+      } else {
+        applyCache(first);
+      }
       setReady(true);
+
       // Show the intro only on the first launch, not on every start.
-      if (!(await hasOnboarded())) setTimeout(() => setShowOnboarding(true), 1500);
+      // Independent of the network so a slow backend can't delay or swallow it.
+      hasOnboarded().then((done) => { if (!done) setTimeout(() => setShowOnboarding(true), 1500); });
+
+      // Background refresh. null = request failed -> keep cached state.
+      const [cafes, rows] = await Promise.all([loadCafes(), loadWallet()]);
+      syncedRef.current = true;
+      if (cafes) setAllCafes(cafes.map(normalizeCafe));
+      if (rows) setWallet(walletFromRows(rows));
+      setSynced(true);
     })();
   }, []);
+
+  // Persist the latest known state for the next cold start.
+  useEffect(() => {
+    if (synced) writeCache(allCafes, wallet);
+  }, [synced, allCafes, wallet]);
 
   const closeOnboarding = useCallback(() => { setShowOnboarding(false); markOnboarded(); }, []);
 
@@ -97,9 +141,8 @@ export default function App() {
   // Refresh wallet from backend (after any action that may have changed state)
   const refreshWallet = useCallback(async () => {
     const rows = await loadWallet();
-    const w = {};
-    rows.forEach((row) => { const card = normalizeCard(row); w[card.slug] = card; });
-    setWallet(w);
+    if (!rows) return;   // request failed — keep current state
+    setWallet(walletFromRows(rows));
   }, []);
 
   // Send a tap to backend by token (e.g. "miyabi-01" or "bryggan-01")
@@ -179,7 +222,7 @@ export default function App() {
   const celebrationCard = celebrationId ? wallet[celebrationId] : null;
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider key={fontEpoch}>
       <StatusBar barStyle="dark-content" backgroundColor={T.bg} />
       <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: T.bg }} onLayout={onLayoutReady}>
         <Header onSettings={() => setShowOnboarding(true)} loading={loadingAction} />
