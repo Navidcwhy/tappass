@@ -105,17 +105,43 @@ export default function App() {
   // Send a tap to backend by token (e.g. "miyabi-01" or "bryggan-01")
   const sendTap = useCallback(async (token) => {
     const result = await tapToken(token);
-    if (!result.ok && result.error === "pending_reward") {
-      const cafe = normalizeCafe(result.cafe);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setToast({ type: "pending-block", card: cafe });
-      setTimeout(() => setToast(null), 3000);
-      return;
-    }
     if (!result.ok) {
-      setToast({ type: "error", message: "Okänd tagg: " + token });
-      setTimeout(() => setToast(null), 2000);
-      return;
+      switch (result.error) {
+        case "pending_reward": {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setToast({ type: "pending-block", card: normalizeCafe(result.cafe) });
+          setTimeout(() => setToast(null), 3000);
+          return;
+        }
+        case "cooldown": {
+          // Backend v3: already stamped here recently — show state, don't scold.
+          const cafe = normalizeCafe(result.cafe);
+          const mins = Number(result.retry_after_minutes) || 0;
+          const when = mins >= 60 ? "om " + Math.ceil(mins / 60) + " tim" : mins > 0 ? "om " + mins + " min" : "strax";
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setToast({
+            type: "info",
+            title: "Redan stämplad hos " + cafe.name,
+            subtitle: "Nästa stämpel " + when + " · " + (result.stamps ?? 0) + " av " + cafe.needed,
+          });
+          setTimeout(() => setToast(null), 3000);
+          return;
+        }
+        case "unknown_tag":
+        case "inactive_cafe": {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          setToast({ type: "error", message: "Okänd tagg — är det en TapPass-stämpel?" });
+          setTimeout(() => setToast(null), 2500);
+          return;
+        }
+        default: {
+          // "network", "bad_device" or anything unexpected: never blame the tag.
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          setToast({ type: "error", message: "Ingen anslutning — tappa igen om en stund." });
+          setTimeout(() => setToast(null), 2500);
+          return;
+        }
+      }
     }
 
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
@@ -172,8 +198,9 @@ export default function App() {
     setRewardId(null);
   };
 
-  // Simulate row passes cafe — we resolve to its first token by slug pattern
-  const simulateStamp = (cafe) => sendTap(cafe.slug + "-01");
+  // Dev-only: the simulate row sends the same tap_token call as a physical tag.
+  // Never shipped to production (__DEV__ is false in EAS production/preview builds).
+  const simulateStamp = __DEV__ ? (cafe) => sendTap(cafe.slug + "-01") : null;
 
   const rewardCard = rewardId ? wallet[rewardId] : null;
   const celebrationCard = celebrationId ? wallet[celebrationId] : null;
@@ -245,9 +272,17 @@ function HomeWithScanner({ nfc, pendingCards, progressCards, totalStamps, onSimu
             Tappa en TapPass-stämpel för att börja samla.
           </Text>
           <Text style={{ fontFamily: FONT.ui, fontSize: 14, color: T.inkSoft, marginTop: 12, lineHeight: 20 }}>
-            Nedan kan du simulera en disk för att testa flödet.
+            {Platform.OS === "ios"
+              ? "Nästa gång du är i kassan hos en ansluten butik: tryck på Skanna och håll iPhonen mot stämpeln."
+              : "Nästa gång du är i kassan hos en ansluten butik: håll telefonen mot stämpeln — stämpeln registreras direkt."}
+            {" "}Under Ställen ser du vilka butiker som är med.
           </Text>
-          <SimulateRow cafes={cafes} onSimulate={onSimulate} />
+          {__DEV__ && onSimulate && (
+            <View>
+              <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkFaint, letterSpacing: 1.4, textAlign: "center", marginTop: 22 }}>DEV · SIMULERA EN DISK</Text>
+              <SimulateRow cafes={cafes} onSimulate={onSimulate} compact />
+            </View>
+          )}
         </View>
       )}
 
@@ -279,9 +314,9 @@ function HomeWithScanner({ nfc, pendingCards, progressCards, totalStamps, onSimu
         </View>
       )}
 
-      {hasCards && (
+      {__DEV__ && onSimulate && hasCards && (
         <View style={{ marginTop: 30 }}>
-          <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkFaint, letterSpacing: 1.4, textAlign: "center", marginBottom: 12 }}>SIMULERA EN DISK</Text>
+          <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkFaint, letterSpacing: 1.4, textAlign: "center", marginBottom: 12 }}>DEV · SIMULERA EN DISK</Text>
           <SimulateRow cafes={cafes} onSimulate={onSimulate} compact />
         </View>
       )}
@@ -492,22 +527,29 @@ function Toast({ toast }) {
   }, [toast]);
   if (!toast) return null;
 
+  // Resolve each toast type to { bg, icon, title, subtitle } in one place.
   const isBlock = toast.type === "pending-block";
   const isError = toast.type === "error";
-  const bg = isBlock ? T.warn : isError ? T.err : T.ink;
+  const isInfo = toast.type === "info";
+  const bg = isBlock ? T.warn : isError ? T.err : isInfo ? T.inkSoft : T.ink;
+  const icon = isBlock ? "gift" : isError ? "close" : isInfo ? "scan" : "check";
+  const title = isBlock ? "Lös in din sparade belöning först"
+    : isError ? toast.message
+    : isInfo ? toast.title
+    : toast.card.name + " · +1 stämpel";
+  const subtitle = isBlock ? "Tappar pausade tills belöningen är inlöst"
+    : isError ? null
+    : isInfo ? toast.subtitle
+    : toast.card.stamps + " av " + toast.card.needed + " stämplar";
 
   return (
     <Animated.View pointerEvents="none" style={{ position: "absolute", left: 22, right: 22, bottom: 100, transform: [{ translateY: y }] }}>
       <View style={{ backgroundColor: bg, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 10 }}>
-        <Icon name={isBlock ? "gift" : isError ? "close" : "check"} size={20} color="#fff" strokeWidth={2.2} />
+        <Icon name={icon} size={20} color="#fff" strokeWidth={2.2} />
         <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: FONT.uiBold, fontSize: 13, color: "#fff" }}>
-            {isBlock ? "Lös in din sparade belöning först" : isError ? toast.message : toast.card.name + " · +1 stämpel"}
-          </Text>
-          {!isError && (
-            <Text style={{ fontFamily: FONT.ui, fontSize: 11.5, color: "rgba(255,255,255,.75)", marginTop: 1 }}>
-              {isBlock ? "Tappar pausade tills belöningen är inlöst" : toast.card.stamps + " av " + toast.card.needed + " stämplar"}
-            </Text>
+          <Text style={{ fontFamily: FONT.uiBold, fontSize: 13, color: "#fff" }}>{title}</Text>
+          {!!subtitle && (
+            <Text style={{ fontFamily: FONT.ui, fontSize: 11.5, color: "rgba(255,255,255,.75)", marginTop: 1 }}>{subtitle}</Text>
           )}
         </View>
       </View>
