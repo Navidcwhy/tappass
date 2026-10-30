@@ -16,19 +16,39 @@
     },
     "android": {
       "package": "se.tappass.app",
-      "permissions": ["NFC", "android.permission.NFC"],
+      "permissions": [
+        "NFC",
+        "android.permission.NFC"
+      ],
       "intentFilters": [
         {
           "action": "VIEW",
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
-            { "scheme": "tappass" },
-            { "scheme": "https", "host": "tappass.se", "pathPrefix": "/t" },
-            { "scheme": "https", "host": "www.tappass.se", "pathPrefix": "/t" }
+            {
+              "scheme": "tappass"
+            },
+            {
+              "scheme": "https",
+              "host": "tappass.se",
+              "pathPrefix": "/t"
+            },
+            {
+              "scheme": "https",
+              "host": "www.tappass.se",
+              "pathPrefix": "/t"
+            }
           ],
           "autoVerify": true
         }
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F7F4EE"
+      }
     },
     "ios": {
       "supportsTablet": false,
@@ -37,7 +57,10 @@
         "NFCReaderUsageDescription": "TapPass läser anslutna butikers NFC-taggar för att lägga till stämplar på dina kort.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:tappass.se", "applinks:www.tappass.se"]
+      "associatedDomains": [
+        "applinks:tappass.se",
+        "applinks:www.tappass.se"
+      ]
     },
     "plugins": [
       [
@@ -45,6 +68,14 @@
         {
           "nfcPermission": "TapPass behöver NFC för att läsa butikens stämpelplatta.",
           "includeNdefEntitlement": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F7F4EE",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200
         }
       ]
     ],

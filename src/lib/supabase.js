@@ -56,7 +56,7 @@ export async function getCurrentSavedCode(cafeSlug) {
 export async function loadWallet() {
   const device_id = await getDeviceId();
   const { data, error } = await supabase.rpc("load_wallet", { p_device_id: device_id });
-  if (error) return [];
+  if (error) return null;   // null = request failed (keep what we have); [] = genuinely empty
   return data || [];
 }
 
@@ -66,6 +66,6 @@ export async function loadCafes() {
     .select("*")
     .eq("active", true)
     .order("name");
-  if (error) return [];
+  if (error) return null;   // null = request failed (keep what we have)
   return data || [];
 }

@@ -41,14 +41,14 @@ export const FONT = {
   mono: "JetBrainsMono",
 };
 
-export const FONTS_URL = {
-  // Instrument Serif — editorial display
-  InstrumentSerif:       "https://fonts.gstatic.com/s/instrumentserif/v4/jizDREVItHgj4qkEvoCJOEYqB9_-A7fI.ttf",
-  InstrumentSerifItalic: "https://fonts.gstatic.com/s/instrumentserif/v4/jizBREVItHgj4qkEvoCnOpWaDKitR7g7uOgN.ttf",
-  // Inter Tight — modern, opentype
-  InterTight:     "https://fonts.gstatic.com/s/intertight/v7/NaPJcZ7VHv8oxllbgT2DiYn5w5Xm.ttf",
-  InterTightMed:  "https://fonts.gstatic.com/s/intertight/v7/NaPDcZ7VHv8oxllbgT2DiZQy5g.ttf",
-  InterTightBold: "https://fonts.gstatic.com/s/intertight/v7/NaPDcZ7VHv8oxllbgT2DipQE5g.ttf",
-  // JetBrains Mono for receipts / tickets
-  JetBrainsMono:  "https://fonts.gstatic.com/s/jetbrainsmono/v18/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxjPVmUsaaDhw.ttf",
+// Fonts are bundled in the app (assets/fonts, SIL OFL licensed) — never fetched
+// at runtime. The old fonts.gstatic.com URLs returned 404 for 5 of 6 files and
+// put a network round-trip on the critical startup path.
+export const FONT_FILES = {
+  InstrumentSerif:       require("../../assets/fonts/InstrumentSerif_400Regular.ttf"),
+  InstrumentSerifItalic: require("../../assets/fonts/InstrumentSerif_400Regular_Italic.ttf"),
+  InterTight:            require("../../assets/fonts/InterTight_400Regular.ttf"),
+  InterTightMed:         require("../../assets/fonts/InterTight_500Medium.ttf"),
+  InterTightBold:        require("../../assets/fonts/InterTight_700Bold.ttf"),
+  JetBrainsMono:         require("../../assets/fonts/JetBrainsMono_400Regular.ttf"),
 };
