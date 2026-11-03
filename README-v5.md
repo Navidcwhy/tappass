@@ -2,10 +2,10 @@
 
 PIN-baserad inlösen, merchant-dashboard på tappass.se/m.
 
-## Miyabis PIN: 482917
+## Butikens PIN
 
-Skriv ner denna. Skicka till Miyabi via SMS när dashboarden är live på tappass.se/m.
-(Bryggans test-PIN är 111111.)
+PIN-koder lagras bara som bcrypt-hash i `cafe_pins` och får ALDRIG skrivas i git, README eller chattloggar.
+Sätt/byt PIN manuellt i Supabase SQL Editor (se mall i `supabase_migration_v2.sql` §13) och skicka koden till butiken via SMS.
 
 ## Gör i exakt denna ordning
 
@@ -62,7 +62,7 @@ Som vanligt. Vid omstart av appen ska gamla stämplar finnas kvar (de ligger i S
 **Nytt flöde för inlösen (helt annorlunda från v4):**
 
 1. Kund får sin sista stämpel → Celebration → "Spara belöning till senare" 
-2. Backend genererar en 6-siffrig kod (ex: `482917`)
+2. Backend genererar en 6-siffrig kod (ex: `735291`)
 3. Kortet visas i appen med "SPARAD BELÖNING" + en stor "Lös in"-knapp
 4. När kunden trycker "Lös in" → ser presentkortet med koden
 5. Kunden visar koden till personalen
@@ -77,8 +77,8 @@ Som vanligt. Vid omstart av appen ska gamla stämplar finnas kvar (de ligger i S
 Gör detta för att verifiera att kedjan fungerar:
 
 1. **På telefonen:** Tappa Miyabi 6 ggr → Celebration → "Spara belöning"
-2. **På telefonen:** Tryck på det sparade kortet → koden visas (ex 482917)
-3. **På datorn:** Gå till tappass.se/m → logga in med `miyabi` + `482917`
+2. **På telefonen:** Tryck på det sparade kortet → koden visas (ex 735291)
+3. **På datorn:** Gå till tappass.se/m → logga in med `miyabi` + butikens PIN
 4. **På datorn:** Skriv in 6-siffriga koden från telefonen → "Bekräfta inlösen"
 5. **På datorn:** Success-popup
 6. **Inom 3 sek på telefonen:** Belöningssidan stängs automatiskt, kortet nollställs

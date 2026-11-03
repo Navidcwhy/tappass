@@ -323,16 +323,12 @@ grant execute on function merchant_stats(text, text) to anon, authenticated;
 grant execute on function merchant_daily(text, text) to anon, authenticated;
 grant execute on function merchant_pending_list(text, text) to anon, authenticated;
 
--- ─── 13. SET MIYABI'S PIN ─────────────────────────────────────────────
--- PIN: 482917 (hashed with pgcrypto's crypt + blowfish salt)
-
-insert into cafe_pins (cafe_id, pin_hash)
-select id, crypt('482917', gen_salt('bf'))
-from cafes where slug = 'miyabi'
-on conflict (cafe_id) do update set pin_hash = excluded.pin_hash;
-
--- Also set a test PIN for Bryggan: 111111
-insert into cafe_pins (cafe_id, pin_hash)
-select id, crypt('111111', gen_salt('bf'))
-from cafes where slug = 'bryggan'
-on conflict (cafe_id) do update set pin_hash = excluded.pin_hash;
+-- ─── 13. SET A MERCHANT PIN ───────────────────────────────────────────
+-- PIN-koder får ALDRIG committas till git (repot var publikt — de gamla
+-- koderna är roterade). Kör raden nedan manuellt i SQL Editor med en riktig
+-- 6-siffrig kod i stället för NY_PIN, och skicka koden till butiken via SMS.
+--
+-- insert into cafe_pins (cafe_id, pin_hash)
+-- select id, crypt('NY_PIN', gen_salt('bf'))
+-- from cafes where slug = 'miyabi'
+-- on conflict (cafe_id) do update set pin_hash = excluded.pin_hash;

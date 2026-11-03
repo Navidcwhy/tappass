@@ -22,11 +22,19 @@ export async function getDeviceId() {
   return id;
 }
 
+// Returns the RPC's own jsonb ({ ok, error: "unknown_tag" | "pending_reward" |
+// "cooldown" | ... }). Transport/RPC failures are normalized to error: "network"
+// so the UI never shows a network failure as "unknown tag".
 export async function tapToken(token) {
   const device_id = await getDeviceId();
-  const { data, error } = await supabase.rpc("tap_token", { p_device_id: device_id, p_token: token });
-  if (error) return { ok: false, error: error.message };
-  return data;
+  try {
+    const { data, error } = await supabase.rpc("tap_token", { p_device_id: device_id, p_token: token });
+    if (error) return { ok: false, error: "network", detail: error.message };
+    if (!data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch (e) {
+    return { ok: false, error: "network", detail: e?.message };
+  }
 }
 
 // Save reward — now returns { ok, code } so we can show the redemption code

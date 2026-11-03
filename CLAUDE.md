@@ -34,6 +34,7 @@ app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin
 eas.json                     # EAS-byggprofiler (development/preview/production)
 supabase_schema.sql          # v1-schema: cafes, tags, users, stamps, redemptions + tap_token m.fl.
 supabase_migration_v2.sql    # v2: cafe_pins (bcrypt-PIN), redeem-koder, merchant_*-RPC:er
+supabase_migration_v3.sql    # v3: cooldown i tap_token, PIN-lockout, tags-policy bort, tag_public_info
 src/
   lib/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
@@ -76,7 +77,7 @@ eas build --profile development --platform ios
 npm start
 ```
 
-Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar skickar samma `tap_token`-anrop som en riktig tagg.
+Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar (endast i dev-builds, `__DEV__`) skickar samma `tap_token`-anrop som en riktig tagg. De renderas aldrig i produktion.
 
 Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `cafe_pins`) — inte i koden. Se README-v5.md.
 
@@ -92,6 +93,8 @@ Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `caf
 
 - Publishable-nyckeln i `src/lib/supabase.js` är avsedd att vara publik; alla skrivningar går genom RPC:er som validerar (PIN:er bcrypt-hashade i `cafe_pins`).
 - `service_role`-nyckeln får ALDRIG hamna i appen eller i Lovable.
+- Butiks-PIN:er får ALDRIG committas (inte i SQL, README eller kommentarer). Sätt dem manuellt i SQL Editor.
+- `tap_token` svarar `error: "cooldown"` om samma enhet stämplat hos samma café inom `cafes.stamp_cooldown_minutes` (default 120). Appen visar det som info, inte fel.
 - `.env` är gitignorad men används inte i dag — Supabase-URL/nyckel är hårdkodade.
 
 ## Kända begränsningar
