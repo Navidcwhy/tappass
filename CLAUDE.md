@@ -104,6 +104,13 @@ Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …
 - **Supabase free plan** pausar projektet efter 7 dagar utan trafik → app och butikspanel slutar svara tills det återstartas.
 - `.env` är gitignorad men används inte i dag — Supabase-URL/nyckel är hårdkodade.
 
+## Köra SQL i produktion
+
+1. **Testa först** mot en kopia av live-schemat (hämta `pg_get_functiondef` från produktion; PGlite i Node fungerar) — skriv aldrig om en funktion utifrån repots SQL.
+2. **Kör via Supabase-kopplingen** (`apply_migration`) så att Navid kan godkänna i bekräftelserutan — det är förstahandsvalet.
+3. **Om bekräftelsen avbryts automatiskt:** Navid kör filen i Supabase SQL Editor på dator. På mobil klipps långa inklistringar (v5 klipptes efter ~2,5 kB) — använd då en kort snutt som hämtar filen från GitHub låst till commit-SHA + md5 och kör den med `execute` (`http`-tillägget skapas och tas bort i samma körning). Mall: PR #11 / körningen 2026-11-03.
+4. **Verifiera alltid efteråt** med läsfrågor (behörigheter, funktionsinnehåll, data orörd) och `get_advisors`.
+
 ## Kända begränsningar
 
 - **Ingen iOS-release publicerad ännu** — men koden är iOS-förberedd (se iOS-sektionen): SDK 54, plattformsgrenad NFC, ikon incheckad. Återstår: AASA-fil på tappass.se, EAS-bygge med Apple-credentials.

@@ -1,11 +1,12 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- TapPass v5 — väntetid per butik + säker butiksinloggning (2026-11-03)
--- STATUS: EJ KÖRD. Kräver v4 (körd). Kör HELA filen i Supabase SQL Editor.
---   Idempotent. Provkörd mot en kopia av live-schemat.
+-- STATUS: KÖRD I PRODUKTION 2026-11-03 (innehållet från commit e22996e,
+--   hämtat med md5-kontroll) och verifierad samma dag. Idempotent.
+--   Provkörd i förväg mot en kopia av live-schemat (72/72 tester).
 --
--- ⚠️ Den nya butikspanelen (tappass.se/m) måste publiceras direkt efter
---    körning: de gamla merchant_*-funktionerna (slug + PIN i varje anrop)
---    tas bort och ersätts av sessionsnycklar.
+-- Butikspanelen (tappass.se/m) publicerades direkt efter körning (Lovable
+-- commit 0f98c22): de gamla merchant_*-funktionerna (slug + PIN i varje
+-- anrop) är borttagna och ersatta av sessionsnycklar.
 --
 -- 1. Väntetid mellan stämplar per butik: cafes.stamp_cooldown_seconds,
 --    10 s–24 h, standard 60 s. Butiken ändrar den själv i panelen.
