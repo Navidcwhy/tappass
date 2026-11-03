@@ -1,13 +1,13 @@
 import "react-native-url-polyfill/auto";
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform, TextInput, Share, Linking as RNLinking } from "react-native";
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
-import { T, RADIUS, FONT, FONT_FILES } from "./src/lib/theme";
-import { Icon, CafeIcon } from "./src/lib/icons";
+import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
+import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
 import { tapToken, saveReward, loadWallet, loadCafes } from "./src/lib/supabase";
@@ -17,7 +17,9 @@ import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
-import BrandMark from "./src/components/BrandMark";
+import StampSheet from "./src/components/StampSheet";
+import Snackbar from "./src/components/Snackbar";
+import Shape from "./src/components/Shape";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -70,19 +72,24 @@ function tokenFromUrl(url) {
   } catch { return null; }
 }
 
+const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
+
 export default function App() {
   const [ready, setReady] = useState(false);
   const [synced, setSynced] = useState(false);   // first backend refresh finished (ok or failed)
   const [fontEpoch, setFontEpoch] = useState(0);
   const syncedRef = useRef(false);
   const [wallet, setWallet] = useState({});      // slug -> card
-  const [allCafes, setAllCafes] = useState([]);  // for discover tab + simulate
+  const [allCafes, setAllCafes] = useState([]);  // for places tab + simulate
   const [tab, setTab] = useState("home");
+  const [filter, setFilter] = useState("all");   // all | ready
   const [rewardId, setRewardId] = useState(null);
   const [celebrationId, setCelebrationId] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toast, setToast] = useState(null);
+  const [stampCard, setStampCard] = useState(null);  // "Ny stämpel"-arket
   const [loadingAction, setLoadingAction] = useState(false);
+  const [bottomH, setBottomH] = useState(96);
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
 
@@ -145,6 +152,28 @@ export default function App() {
     setWallet(walletFromRows(rows));
   }, []);
 
+  // Ett meddelande i taget; ett nytt ersätter det gamla och får full visningstid.
+  const toastTimer = useRef(null);
+  const showToast = useCallback((t, ms) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast(t);
+    toastTimer.current = setTimeout(() => { toastTimer.current = null; setToast(null); }, ms);
+  }, []);
+
+  const stampTimer = useRef(null);
+  const closeStamp = useCallback(() => {
+    if (stampTimer.current) clearTimeout(stampTimer.current);
+    stampTimer.current = null;
+    setStampCard(null);
+  }, []);
+  const showStamp = useCallback((card) => {
+    if (stampTimer.current) clearTimeout(stampTimer.current);
+    setStampCard(card);
+    stampTimer.current = setTimeout(() => { stampTimer.current = null; setStampCard(null); }, 4500);
+  }, []);
+
+  const lastFailedTokenRef = useRef(null);
+
   // Send a tap to backend by token (e.g. "miyabi-01" or "bryggan-01")
   const sendTap = useCallback(async (token) => {
     const result = await tapToken(token);
@@ -152,44 +181,42 @@ export default function App() {
       switch (result.error) {
         case "pending_reward": {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          setToast({ type: "pending-block", card: normalizeCafe(result.cafe) });
-          setTimeout(() => setToast(null), 3000);
+          showToast({ type: "pending-block", card: normalizeCafe(result.cafe) }, 5000);
           return;
         }
         case "cooldown": {
           // Backend v5: butikens väntetid (10 s–24 h) — visa läget, skäll inte.
-          const cafe = normalizeCafe(result.cafe);
+          const cafe = normalizeCafe(result.cafe) || {};
           const secs = Number(result.retry_after_seconds) || 0;
           const mins = Number(result.retry_after_minutes) || Math.ceil(secs / 60);
           const when = secs > 0 && secs < 60 ? "om " + secs + " sek"
             : mins >= 60 ? "om " + Math.ceil(mins / 60) + " tim"
             : mins > 0 ? "om " + mins + " min" : "strax";
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setToast({
+          showToast({
             type: "info",
             title: "Redan stämplad hos " + cafe.name,
             subtitle: "Nästa stämpel " + when + " · " + (result.stamps ?? 0) + " av " + cafe.needed,
-          });
-          setTimeout(() => setToast(null), 3000);
+          }, 3500);
           return;
         }
         case "unknown_tag":
         case "inactive_cafe": {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          setToast({ type: "error", message: "Okänd tagg — är det en TapPass-stämpel?" });
-          setTimeout(() => setToast(null), 2500);
+          showToast({ type: "unknown" }, 3500);
           return;
         }
         default: {
           // "network", "bad_device" or anything unexpected: never blame the tag.
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          setToast({ type: "error", message: "Ingen anslutning — tappa igen om en stund." });
-          setTimeout(() => setToast(null), 2500);
+          lastFailedTokenRef.current = token;
+          showToast({ type: "network", canRetry: true }, 5000);
           return;
         }
       }
     }
 
+    lastFailedTokenRef.current = null;
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
     setWallet((prev) => ({ ...prev, [card.slug]: card }));
 
@@ -198,10 +225,9 @@ export default function App() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      setToast({ type: "stamped", card });
-      setTimeout(() => setToast(null), 2400);
+      showStamp(card);
     }
-  }, []);
+  }, [showToast, showStamp]);
 
   // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
   // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
@@ -233,13 +259,11 @@ export default function App() {
 
   const cards = Object.values(wallet);
   const pendingCards = cards.filter((c) => c.pendingReward);
-  // Fullt kort som inte sparats (kodrutan stängd före "dra för att öppna",
+  // Fullt kort som inte sparats (kodrutan stängd före "dra för att visa koden",
   // misslyckat sparande, appen stängd under firandet). Måste synas — annars
   // finns belöningen bara i databasen och kunden hittar den aldrig.
   const readyCards = cards.filter((c) => !c.pendingReward && c.stamps >= c.needed);
   const progressCards = cards.filter((c) => !c.pendingReward && c.stamps < c.needed);
-  const discover = allCafes.filter((b) => !wallet[b.slug]);
-  const totalStamps = cards.reduce((s, c) => s + c.stamps, 0);
 
   const onSaveReward = async () => {
     setLoadingAction(true);
@@ -253,11 +277,17 @@ export default function App() {
     setCelebrationId(null);
   };
   // Personalen har löst in (koden försvann på servern) → hämta nytt kortläge.
+  // Kodrutan visar "Inlöst!" och stängs av kunden.
   const onRedeemed = async () => {
     setLoadingAction(true);
     await refreshWallet();
     setLoadingAction(false);
-    setRewardId(null);
+  };
+
+  const onSnackAction = (a) => {
+    setToast(null);
+    if (a.type === "open-reward" && a.slug) setRewardId(a.slug);
+    if (a.type === "retry" && lastFailedTokenRef.current) sendTap(lastFailedTokenRef.current);
   };
 
   // Dev-only: the simulate row sends the same tap_token call as a physical tag.
@@ -271,126 +301,240 @@ export default function App() {
     <SafeAreaProvider key={fontEpoch}>
       <StatusBar barStyle="dark-content" backgroundColor={T.bg} />
       <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: T.bg }} onLayout={onLayoutReady}>
-        <Header onSettings={() => setShowOnboarding(true)} loading={loadingAction} />
+        <Header title={tab === "home" ? "Dina kort" : "Ställen"} onHelp={() => setShowOnboarding(true)} loading={loadingAction} />
 
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 130 }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={refreshWallet} tintColor={T.inkMute} />}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={refreshWallet} tintColor={T.inkMute} colors={[T.primary]} />}
         >
-          {tab === "home" && (
-            <HomeWithScanner
-              nfc={nfc}
-              pendingCards={pendingCards}
+          {tab === "home" ? (
+            <HomeTab
               readyCards={readyCards}
+              pendingCards={pendingCards}
               progressCards={progressCards}
-              totalStamps={totalStamps}
-              onSimulate={simulateStamp}
-              onSendTap={sendTagTap}
+              filter={filter}
+              setFilter={setFilter}
               onOpenReward={setRewardId}
-              hasCards={cards.length > 0}
+              onFindPlaces={() => setTab("discover")}
+              onSimulate={simulateStamp}
               cafes={allCafes}
             />
+          ) : (
+            <PlacesTab cafes={allCafes} wallet={wallet} />
           )}
-          {tab === "discover" && <DiscoverTab places={discover} />}
         </ScrollView>
 
-        <BottomNav tab={tab} setTab={setTab} />
-        <Toast toast={toast} />
+        <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}>
+          {tab === "home" && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
+          <BottomNav tab={tab} setTab={setTab} />
+        </View>
 
-        <RewardSheet visible={!!rewardCard} card={rewardCard} onClose={() => setRewardId(null)} onRedeemed={onRedeemed} />
-        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} onSave={onSaveReward} onRedeemNow={onRedeemNow} />
+        <Snackbar toast={toast} bottom={bottomH + 12} onAction={onSnackAction} />
+
+        <StampSheet card={stampCard} onClose={closeStamp} />
+        <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => setRewardId(null)} onRedeemed={onRedeemed} />
+        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => setCelebrationId(null)} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-function Header({ onSettings, loading }) {
+function Header({ title, onHelp, loading }) {
   return (
-    <View style={{ paddingHorizontal: 22, paddingTop: 8, paddingBottom: 4, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+    <View style={{ paddingLeft: 20, paddingRight: 16, paddingTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <BrandMark size={26} />
-        <Text style={{ fontFamily: FONT.display, fontSize: 24, color: T.ink }}>TapPass</Text>
+        <Text accessibilityRole="header" style={{ fontFamily: FONT.title, fontSize: 34, lineHeight: 40, color: T.ink }}>{title}</Text>
         {loading && <ActivityIndicator size="small" color={T.inkMute} />}
       </View>
-      <Pressable onPress={onSettings} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: T.surface, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: T.hairline }}>
-        <Icon name="sparkles" size={18} color={T.inkSoft} />
+      <Pressable accessibilityLabel="Hjälp och introduktion" onPress={onHelp} style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 24, backgroundColor: T.container, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.8 : 1 })}>
+        <Icon name="help" size={22} color={T.ink} />
       </Pressable>
     </View>
   );
 }
 
-function HomeWithScanner({ nfc, pendingCards, readyCards, progressCards, totalStamps, onSimulate, onSendTap, onOpenReward, hasCards, cafes }) {
-  const cardCount = pendingCards.length + readyCards.length + progressCards.length;
-  const rewardCount = pendingCards.length + readyCards.length;
+function Chip({ label, selected, onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
+      style={{ height: 32, paddingLeft: selected ? 8 : 12, paddingRight: 12, borderRadius: 8, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: selected ? T.secondaryContainer : "transparent", borderWidth: selected ? 0 : 1, borderColor: T.outline }}
+    >
+      {selected && <Icon name="check" size={18} color={T.onSecondaryContainer} strokeWidth={2.4} />}
+      <Text style={{ fontFamily: selected ? FONT.semibold : FONT.medium, fontSize: 14, color: selected ? T.onSecondaryContainer : T.inkSoft }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes }) {
+  const all = [...readyCards, ...pendingCards, ...progressCards];
+  const rewardCount = readyCards.length + pendingCards.length;
+  const f = rewardCount > 0 ? filter : "all";
+  const shown = f === "ready" ? [...readyCards, ...pendingCards] : all;
+
+  if (all.length === 0) {
+    return <EmptyHome onFindPlaces={onFindPlaces} onSimulate={onSimulate} cafes={cafes} />;
+  }
 
   return (
     <View>
-      <LiveScanner nfc={nfc} onSendTap={onSendTap} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+        <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
+        {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
+      </View>
+      <View style={{ gap: 12, marginTop: 16 }}>
+        {shown.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
+      </View>
+      {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
+    </View>
+  );
+}
 
-      {!hasCards && (
-        <View style={{ paddingTop: 8 }}>
-          <Text style={{ fontFamily: FONT.uiMed, fontSize: 11, color: T.inkMute, letterSpacing: 1.6 }}>VÄLKOMMEN</Text>
-          <Text style={{ fontFamily: FONT.display, fontSize: 36, color: T.ink, lineHeight: 40, marginTop: 6 }}>
-            Tappa en TapPass-stämpel för att börja samla.
+function EmptyHome({ onFindPlaces, onSimulate, cafes }) {
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 32 }}>
+      <View style={{ width: 240, height: 210 }}>
+        <Shape kind="cookie12" size={190} color={T.container} style={{ position: "absolute", left: 25, top: 10 }}>
+          <Icon name="nfc" size={56} color={T.inkSoft} strokeWidth={1.8} />
+        </Shape>
+        <Shape kind="sunny8" size={72} color={T.primaryContainer} style={{ position: "absolute", right: 0, top: 0 }} />
+        <Shape kind="clover4" size={60} color="#D3E8EC" style={{ position: "absolute", left: 0, bottom: 6 }} />
+      </View>
+      <Text style={{ marginTop: 20, fontFamily: FONT.title, fontSize: 28, lineHeight: 36, color: T.ink, textAlign: "center" }}>Inga kort än</Text>
+      <Text style={{ marginTop: 8, maxWidth: 300, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }}>
+        {Platform.OS === "ios"
+          ? "Tryck på Skanna stämpel och håll telefonen mot en TapPass-stämpel i kassan, så dyker ditt första kort upp här."
+          : "Tappa telefonen mot en TapPass-stämpel i kassan, så dyker ditt första kort upp här."}
+      </Text>
+      <Pressable onPress={onFindPlaces} accessibilityRole="button" style={({ pressed }) => ({ marginTop: 20, height: 48, paddingLeft: 18, paddingRight: 24, borderRadius: 24, backgroundColor: T.secondaryContainer, flexDirection: "row", alignItems: "center", gap: 8, opacity: pressed ? 0.85 : 1 })}>
+        <Icon name="pin" size={20} color={T.onSecondaryContainer} />
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: T.onSecondaryContainer }}>Se ställen med TapPass</Text>
+      </Pressable>
+      {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
+    </View>
+  );
+}
+
+function DevSimulate({ cafes, onSimulate }) {
+  if (!cafes || cafes.length === 0) return null;
+  return (
+    <View style={{ marginTop: 28, alignSelf: "stretch" }}>
+      <Text style={{ fontFamily: FONT.bold, fontSize: 11, letterSpacing: 0.88, color: T.inkMute, textAlign: "center", marginBottom: 10 }}>DEV · SIMULERA EN DISK</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+        {cafes.map((b) => (
+          <Pressable key={b.slug} onPress={() => onSimulate(b)} style={{ height: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: T.outline, alignItems: "center", justifyContent: "center" }}>
+            <Text style={{ fontFamily: FONT.medium, fontSize: 13, color: T.inkSoft }}>+1 {b.name}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function PlacesTab({ cafes, wallet }) {
+  const [q, setQ] = useState("");
+  const [type, setType] = useState(null);
+  const types = useMemo(
+    () => [...new Set(cafes.map((c) => c.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, "sv")),
+    [cafes]
+  );
+  const query = q.trim().toLowerCase();
+  const list = cafes.filter((c) =>
+    (!type || c.type === type) &&
+    (!query || [c.name, c.area, c.type].some((v) => String(v || "").toLowerCase().includes(query)))
+  );
+
+  const tip = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Share.share({ message: "Har ni koll på TapPass? Digitala stämpelkort som kunderna samlar med mobilen i kassan – inget papperskort att tappa bort. https://tappass.se" }).catch(() => {});
+  };
+
+  return (
+    <View style={{ paddingBottom: 8 }}>
+      <View style={{ marginTop: 14, height: 56, borderRadius: 28, backgroundColor: T.container, paddingLeft: 16, paddingRight: 8, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon name="search" size={22} color={T.inkSoft} />
+        <TextInput
+          value={q}
+          onChangeText={setQ}
+          placeholder="Sök ställe eller område"
+          placeholderTextColor={T.inkSoft}
+          returnKeyType="search"
+          autoCorrect={false}
+          style={{ flex: 1, height: 56, fontFamily: FONT.regular, fontSize: 16, color: T.ink, paddingVertical: 0 }}
+        />
+        {!!q && (
+          <Pressable accessibilityLabel="Rensa sökning" onPress={() => setQ("")} style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <Icon name="close" size={20} color={T.inkSoft} />
+          </Pressable>
+        )}
+      </View>
+
+      {types.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 14, marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}>
+          <Chip label="Alla" selected={!type} onPress={() => setType(null)} />
+          {types.map((t) => <Chip key={t} label={t} selected={type === t} onPress={() => setType(type === t ? null : t)} />)}
+        </ScrollView>
+      )}
+
+      <Text style={{ marginTop: 20, marginBottom: 8, marginLeft: 4, fontFamily: FONT.semibold, fontSize: 14, color: T.inkSoft }}>
+        {list.length} {list.length === 1 ? "ställe" : "ställen"}
+      </Text>
+
+      <View style={{ gap: 10 }}>
+        {list.map((c) => <PlaceCard key={c.slug} cafe={c} card={wallet[c.slug]} />)}
+      </View>
+
+      {list.length === 0 && cafes.length > 0 && (
+        <Text style={{ marginTop: 4, marginLeft: 4, fontFamily: FONT.regular, fontSize: 15, color: T.inkSoft }}>
+          Inga ställen matchar {query ? "”" + q.trim() + "”" : "filtret"}.
+        </Text>
+      )}
+
+      <View style={{ marginTop: 10, padding: 16, borderRadius: 24, borderWidth: 1.5, borderStyle: "dashed", borderColor: T.outline, flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+        <Shape kind="sunny8" size={48} color={T.tertiaryContainer}>
+          <Icon name="megaphone" size={22} color={T.onTertiaryContainer} />
+        </Shape>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: FONT.title, fontSize: 16, lineHeight: 22, color: T.ink }}>Saknar du ditt favoritställe?</Text>
+          <Text style={{ marginTop: 2, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>Skicka ett tips om TapPass till dem.</Text>
+          <Pressable onPress={tip} accessibilityRole="button" style={{ marginTop: 6, alignSelf: "flex-start", minHeight: 40, justifyContent: "center" }}>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.primary }}>Tipsa ett ställe</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function PlaceCard({ cafe, card }) {
+  const t = toneFor(cafe.ink);
+  const meta = [cafe.type, cafe.area].filter(Boolean).join(" · ");
+  const needed = cafe.needed || card?.needed || 0;
+  const progress = card
+    ? (card.pendingReward || card.stamps >= card.needed ? "Klar" : card.stamps + "/" + card.needed)
+    : null;
+  return (
+    <View style={{ padding: 16, borderRadius: 24, backgroundColor: t.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
+      <Shape kind="cookie9" size={52} color={t.primary}>
+        <Text style={{ fontFamily: FONT.bold, fontSize: 20, color: "#FFFFFF" }}>{initialOf(cafe.name)}</Text>
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 18, lineHeight: 24, color: t.onContainer }}>{cafe.name}</Text>
+        {!!meta && <Text numberOfLines={1} style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: t.muted }}>{meta}</Text>}
+        <View style={{ marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Icon name="gift" size={16} color={t.onContainer} />
+          <Text style={{ flex: 1, fontFamily: FONT.medium, fontSize: 14, lineHeight: 19, color: t.onContainer }}>
+            {cafe.rewardShort || cafe.reward}{needed ? " efter " + needed + " stämplar" : ""}
           </Text>
-          <Text style={{ fontFamily: FONT.ui, fontSize: 14, color: T.inkSoft, marginTop: 12, lineHeight: 20 }}>
-            {Platform.OS === "ios"
-              ? "Nästa gång du är i kassan hos en ansluten butik: tryck på Skanna och håll iPhonen mot stämpeln."
-              : "Nästa gång du är i kassan hos en ansluten butik: håll telefonen mot stämpeln — stämpeln registreras direkt."}
-            {" "}Under Ställen ser du vilka butiker som är med.
-          </Text>
-          {__DEV__ && onSimulate && (
-            <View>
-              <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkFaint, letterSpacing: 1.4, textAlign: "center", marginTop: 22 }}>DEV · SIMULERA EN DISK</Text>
-              <SimulateRow cafes={cafes} onSimulate={onSimulate} compact />
-            </View>
-          )}
         </View>
-      )}
-
-      {hasCards && (
-        <View style={{ paddingTop: 14, paddingBottom: 24, flexDirection: "row", gap: 18 }}>
-          <Stat label="Aktiva kort" value={cardCount} />
-          <View style={{ width: 1, backgroundColor: T.hairline }} />
-          <Stat label="Stämplar totalt" value={totalStamps} />
-          <View style={{ width: 1, backgroundColor: T.hairline }} />
-          <Stat label="Belöningar" value={rewardCount} accent={rewardCount > 0} />
-        </View>
-      )}
-
-      {readyCards.length > 0 && (
-        <View style={{ marginBottom: 22 }}>
-          <SectionLabel text="Belöning klar" />
-          <View style={{ gap: 14, marginTop: 12 }}>
-            {readyCards.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
-          </View>
-        </View>
-      )}
-
-      {pendingCards.length > 0 && (
-        <View style={{ marginBottom: 22 }}>
-          <SectionLabel text="Sparade belöningar" />
-          <View style={{ gap: 14, marginTop: 12 }}>
-            {pendingCards.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
-          </View>
-        </View>
-      )}
-
-      {progressCards.length > 0 && (
-        <View>
-          <SectionLabel text="Pågående kort" />
-          <View style={{ gap: 14, marginTop: 12 }}>
-            {progressCards.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
-          </View>
-        </View>
-      )}
-
-      {__DEV__ && onSimulate && hasCards && (
-        <View style={{ marginTop: 30 }}>
-          <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkFaint, letterSpacing: 1.4, textAlign: "center", marginBottom: 12 }}>DEV · SIMULERA EN DISK</Text>
-          <SimulateRow cafes={cafes} onSimulate={onSimulate} compact />
+      </View>
+      {!!progress && (
+        <View style={{ alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: t.primary }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: "#FFFFFF" }}>{progress}</Text>
         </View>
       )}
     </View>
@@ -411,6 +555,12 @@ function LiveScanner({ nfc, onSendTap }) {
 // Backend handles both, but our DB uses "<slug>-01" format.
 function normalizeToken(token) {
   return token.includes("-") ? token : token + "-01";
+}
+
+function openNfcSettings() {
+  RNLinking.sendIntent("android.settings.NFC_SETTINGS")
+    .catch(() => RNLinking.openSettings())
+    .catch(() => {});
 }
 
 function AndroidScanner({ nfc, onSendTap }) {
@@ -448,19 +598,55 @@ function AndroidScanner({ nfc, onSendTap }) {
     return () => { cancelled = true; cancelNfc(); };
   }, [nfc.enabled, onSendTap]);
 
-  return (
-    <View style={{ paddingTop: 18, paddingBottom: 24, alignItems: "center" }}>
-      <Radar enabled={!!nfc.enabled} />
-      <Text style={{ fontFamily: FONT.display, fontSize: 26, color: T.ink, marginTop: 18, textAlign: "center" }}>
-        {nfc.supported === false ? "NFC stöds inte" : nfc.enabled ? "Håll mot taggen" : "Slå på NFC"}
-      </Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: nfc.enabled ? T.ok : T.inkFaint }} />
-        <Text style={{ fontFamily: FONT.uiMed, fontSize: 12, color: T.inkMute }}>
-          {nfc.supported === null ? "Kontrollerar…" : nfc.enabled ? "Lyssnar nu" : "NFC är avstängt"}
-        </Text>
+  // NFC avstängt i telefonen: tydlig ruta med genväg till inställningen.
+  if (nfc.supported && !nfc.enabled) {
+    return (
+      <View style={{ marginHorizontal: 16, marginBottom: 12, paddingVertical: 10, paddingLeft: 16, paddingRight: 8, borderRadius: 16, backgroundColor: T.surface, borderWidth: 1, borderColor: T.outline, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon name="nfc" size={22} color={T.inkSoft} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.ink }}>NFC är avstängt</Text>
+          <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: T.inkSoft }}>Slå på NFC för att kunna stämpla.</Text>
+        </View>
+        <Pressable onPress={openNfcSettings} accessibilityRole="button" style={{ height: 40, paddingHorizontal: 12, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.primary }}>Slå på</Text>
+        </Pressable>
       </View>
-      {!!err && <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.warn, marginTop: 6 }}>{err}</Text>}
+    );
+  }
+
+  const checking = nfc.supported === null;
+  const unsupported = nfc.supported === false;
+  const title = checking ? "Kontrollerar NFC…" : unsupported ? "NFC stöds inte" : "Redo att stämpla";
+  const text = unsupported ? "Den här telefonen saknar NFC-läsare." : err || (checking ? "" : "Håll telefonen mot stämpeln i kassan.");
+
+  return (
+    <View style={{ marginHorizontal: 16, marginBottom: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 20, backgroundColor: T.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
+      <ListeningBadge active={!!nfc.enabled && !unsupported} busy={checking} />
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.ink }}>{title}</Text>
+        {!!text && <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: err ? T.errorText : T.inkSoft }}>{text}</Text>}
+      </View>
+    </View>
+  );
+}
+
+// NFC-ikonen i en cirkel med en lugn puls medan telefonen lyssnar.
+function ListeningBadge({ active, busy }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active) { pulse.stopAnimation(); pulse.setValue(0); return; }
+    const anim = Animated.loop(Animated.timing(pulse, { toValue: 1, duration: 1800, easing: Easing.out(Easing.quad), useNativeDriver: true }));
+    anim.start();
+    return () => anim.stop();
+  }, [active]);
+  return (
+    <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
+      {active && (
+        <Animated.View style={{ position: "absolute", width: 40, height: 40, borderRadius: 20, backgroundColor: T.primaryContainer, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }] }} />
+      )}
+      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: T.primaryContainer, alignItems: "center", justifyContent: "center" }}>
+        {busy ? <ActivityIndicator size="small" color={T.onPrimaryContainer} /> : <Icon name="nfc" size={20} color={T.onPrimaryContainer} />}
+      </View>
     </View>
   );
 }
@@ -486,7 +672,7 @@ function IosScanner({ nfc, onSendTap }) {
         await onSendTap(normalizeToken(token));
       } else {
         await cancelNfc();
-        setErr("Ingen TapPass-tagg hittades. Försök igen.");
+        setErr("Ingen TapPass-stämpel hittades. Försök igen.");
       }
     } catch (e) {
       await cancelNfc();
@@ -497,205 +683,56 @@ function IosScanner({ nfc, onSendTap }) {
     }
   };
 
-  const unsupported = nfc.supported === false;
-
-  return (
-    <View style={{ paddingTop: 18, paddingBottom: 24, alignItems: "center" }}>
-      {scanning
-        ? <Radar enabled />
-        : (
-          <View style={{ height: 144, alignItems: "center", justifyContent: "center" }}>
-            <BrandMark size={112} animated strokeWidth={9} />
-          </View>
-        )}
-      <Text style={{ fontFamily: FONT.display, fontSize: 26, color: T.ink, marginTop: 18, textAlign: "center" }}>
-        {unsupported ? "NFC stöds inte" : scanning ? "Skannar…" : "Skanna en stämpel"}
-      </Text>
-      <Text style={{ fontFamily: FONT.ui, fontSize: 13, color: T.inkMute, marginTop: 6, textAlign: "center", maxWidth: 280, lineHeight: 19 }}>
-        {unsupported
-          ? "Den här enheten saknar NFC-läsare."
-          : "Tryck på knappen och håll toppen av telefonen mot stämpeln i kassan."}
-      </Text>
-
-      {!unsupported && (
-        <Pressable
-          onPress={onScan}
-          disabled={scanning}
-          style={({ pressed }) => ({
-            marginTop: 22,
-            backgroundColor: T.ink,
-            paddingHorizontal: 26,
-            paddingVertical: 15,
-            borderRadius: RADIUS.pill,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            opacity: scanning ? 0.6 : pressed ? 0.85 : 1,
-          })}
-        >
-          {scanning
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Icon name="scan" size={20} color="#fff" strokeWidth={2} />}
-          <Text style={{ fontFamily: FONT.uiBold, fontSize: 15, color: "#fff", letterSpacing: 0.3 }}>
-            {scanning ? "Håll mot taggen…" : "Skanna stämpel"}
-          </Text>
-        </Pressable>
-      )}
-
-      {!!err && <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.warn, marginTop: 12, textAlign: "center" }}>{err}</Text>}
-    </View>
-  );
-}
-
-function Radar({ enabled }) {
-  const wave = useRef([new Animated.Value(0), new Animated.Value(0), new Animated.Value(0)]).current;
-  const float = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!enabled) { wave.forEach((v) => v.stopAnimation()); float.stopAnimation(); return; }
-    wave.forEach((v, i) => {
-      Animated.loop(Animated.sequence([
-        Animated.delay(i * 800),
-        Animated.timing(v, { toValue: 1, duration: 2400, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(v, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])).start();
-    });
-    Animated.loop(Animated.sequence([
-      Animated.timing(float, { toValue: -8, duration: 1500, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      Animated.timing(float, { toValue: 0, duration: 1500, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-    ])).start();
-  }, [enabled]);
-
-  return (
-    <View style={{ height: 144, alignItems: "center", justifyContent: "center" }}>
-      {enabled && wave.map((v, i) => (
-        <Animated.View key={i} style={{ position: "absolute", width: 140, height: 140, borderRadius: 70, borderWidth: 1.5, borderColor: T.accent, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }), transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 2.5] }) }] }} />
-      ))}
-      <Animated.View style={{ width: 92, height: 92, borderRadius: 46, backgroundColor: enabled ? T.accent : T.bgAlt, borderWidth: enabled ? 0 : 1, borderColor: T.hairline, alignItems: "center", justifyContent: "center", transform: [{ translateY: enabled ? float : 0 }], shadowColor: enabled ? T.accentDark : "transparent", shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: enabled ? 8 : 0 }}>
-        <Icon name={enabled ? "scan" : "wifi"} size={36} color={enabled ? T.accentInk : T.inkFaint} strokeWidth={2} />
-      </Animated.View>
-    </View>
-  );
-}
-
-function SimulateRow({ cafes, onSimulate, compact }) {
-  return (
-    <View style={{ marginTop: compact ? 0 : 22, flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-      {cafes.map((b) => (
-        <Pressable key={b.slug} onPress={() => onSimulate(b)} style={{ width: 96, paddingVertical: 12, borderRadius: RADIUS.md, borderWidth: 1, borderColor: T.hairline, backgroundColor: T.surface, alignItems: "center", gap: 6 }}>
-          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: b.soft, alignItems: "center", justifyContent: "center" }}>
-            <CafeIcon symbol={b.symbol} size={17} color={b.ink} strokeWidth={1.6} />
-          </View>
-          <Text style={{ fontFamily: FONT.uiMed, fontSize: 10.5, color: T.ink, textAlign: "center" }}>{b.name}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function Toast({ toast }) {
-  const y = useRef(new Animated.Value(80)).current;
-  useEffect(() => {
-    if (!toast) { Animated.timing(y, { toValue: 80, duration: 200, useNativeDriver: true }).start(); return; }
-    Animated.spring(y, { toValue: 0, friction: 7, tension: 60, useNativeDriver: true }).start();
-  }, [toast]);
-  if (!toast) return null;
-
-  // Resolve each toast type to { bg, icon, title, subtitle } in one place.
-  const isBlock = toast.type === "pending-block";
-  const isError = toast.type === "error";
-  const isInfo = toast.type === "info";
-  const bg = isBlock ? T.warn : isError ? T.err : isInfo ? T.inkSoft : T.ink;
-  const icon = isBlock ? "gift" : isError ? "close" : isInfo ? "scan" : "check";
-  const title = isBlock ? "Lös in din sparade belöning först"
-    : isError ? toast.message
-    : isInfo ? toast.title
-    : toast.card.name + " · +1 stämpel";
-  const subtitle = isBlock ? "Tappar pausade tills belöningen är inlöst"
-    : isError ? null
-    : isInfo ? toast.subtitle
-    : toast.card.stamps + " av " + toast.card.needed + " stämplar";
-
-  return (
-    <Animated.View pointerEvents="none" style={{ position: "absolute", left: 22, right: 22, bottom: 100, transform: [{ translateY: y }] }}>
-      <View style={{ backgroundColor: bg, borderRadius: RADIUS.md, paddingHorizontal: 16, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12, shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 10 }}>
-        <Icon name={icon} size={20} color="#fff" strokeWidth={2.2} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: FONT.uiBold, fontSize: 13, color: "#fff" }}>{title}</Text>
-          {!!subtitle && (
-            <Text style={{ fontFamily: FONT.ui, fontSize: 11.5, color: "rgba(255,255,255,.75)", marginTop: 1 }}>{subtitle}</Text>
-          )}
-        </View>
+  if (nfc.supported === false) {
+    return (
+      <View style={{ marginHorizontal: 16, marginBottom: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.container, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon name="nfc" size={22} color={T.inkSoft} />
+        <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: T.inkSoft }}>Den här enheten saknar NFC-läsare.</Text>
       </View>
-    </Animated.View>
-  );
-}
+    );
+  }
 
-function DiscoverTab({ places }) {
   return (
-    <View style={{ paddingTop: 18 }}>
-      <Text style={{ fontFamily: FONT.uiMed, fontSize: 11, color: T.inkMute, letterSpacing: 1.6 }}>UPPTÄCK</Text>
-      <Text style={{ fontFamily: FONT.display, fontSize: 42, color: T.ink, lineHeight: 46, marginTop: 6 }}>Nya ställen</Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 16, marginBottom: 18 }}>
-        <Icon name="pin" size={13} color={T.inkMute} />
-        <Text style={{ fontFamily: FONT.ui, fontSize: 12.5, color: T.inkMute }}>Anslutna butiker du inte besökt än</Text>
-      </View>
-      {places.length === 0 && (
-        <Text style={{ fontFamily: FONT.ui, fontSize: 13, color: T.inkMute, marginTop: 20 }}>
-          Du har stämplat hos alla anslutna butiker. Bra jobbat.
-        </Text>
-      )}
-      <View style={{ gap: 12 }}>
-        {places.map((b) => (
-          <View key={b.slug} style={{ backgroundColor: T.surface, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: T.hairline, padding: 18, flexDirection: "row", alignItems: "center", gap: 14 }}>
-            <View style={{ width: 50, height: 50, borderRadius: 25, backgroundColor: b.soft, alignItems: "center", justifyContent: "center" }}>
-              <CafeIcon symbol={b.symbol} size={22} color={b.ink} strokeWidth={1.6} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: FONT.display, fontSize: 19, color: T.ink, lineHeight: 22 }}>{b.name}</Text>
-              <Text style={{ fontFamily: FONT.ui, fontSize: 12.5, color: T.inkMute, marginTop: 1 }}>{b.type} · {b.area}</Text>
-              <Text style={{ fontFamily: FONT.ui, fontSize: 13, color: b.ink, marginTop: 4 }}>{b.rewardShort}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function Stat({ label, value, accent }) {
-  return (
-    <View>
-      <Text style={{ fontFamily: FONT.uiMed, fontSize: 10, color: T.inkMute, letterSpacing: 1.4 }}>{label.toUpperCase()}</Text>
-      <Text style={{ fontFamily: FONT.display, fontSize: 26, color: accent ? T.accentDark : T.ink, marginTop: 2 }}>{value}</Text>
-    </View>
-  );
-}
-
-function SectionLabel({ text }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-      <Text style={{ fontFamily: FONT.uiBold, fontSize: 10, color: T.inkMute, letterSpacing: 1.6 }}>{text.toUpperCase()}</Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: T.hairline }} />
+    <View style={{ paddingHorizontal: 16, paddingBottom: 16, alignItems: "flex-end", gap: 8 }}>
+      {!!err && <Text style={{ alignSelf: "stretch", textAlign: "right", fontFamily: FONT.regular, fontSize: 13, color: T.errorText }}>{err}</Text>}
+      <Pressable
+        onPress={onScan}
+        disabled={scanning}
+        accessibilityRole="button"
+        style={({ pressed }) => ({ height: 56, paddingLeft: 16, paddingRight: 20, borderRadius: 16, backgroundColor: T.primaryContainer, flexDirection: "row", alignItems: "center", gap: 10, opacity: scanning ? 0.75 : pressed ? 0.88 : 1, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 })}
+      >
+        {scanning
+          ? <ActivityIndicator size="small" color={T.onPrimaryContainer} />
+          : <Icon name="nfc" size={22} color={T.onPrimaryContainer} />}
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.onPrimaryContainer }}>{scanning ? "Håll mot stämpeln…" : "Skanna stämpel"}</Text>
+      </Pressable>
     </View>
   );
 }
 
 function BottomNav({ tab, setTab }) {
+  const insets = useSafeAreaInsets();
   const Item = ({ k, label, icon }) => {
     const on = tab === k;
     return (
-      <Pressable onPress={() => setTab(k)} style={{ flex: 1, paddingVertical: 12, alignItems: "center", gap: 4 }}>
-        <Icon name={icon} size={22} color={on ? "#fff" : "rgba(255,255,255,.5)"} strokeWidth={on ? 2 : 1.6} />
-        <Text style={{ fontFamily: FONT.uiMed, fontSize: 10.5, color: on ? "#fff" : "rgba(255,255,255,.5)", letterSpacing: 0.3 }}>{label}</Text>
+      <Pressable
+        onPress={() => { if (!on) Haptics.selectionAsync(); setTab(k); }}
+        accessibilityRole="tab"
+        accessibilityState={{ selected: on }}
+        accessibilityLabel={label}
+        style={{ flex: 1, alignItems: "center", gap: 4 }}
+      >
+        <View style={{ width: 64, height: 32, borderRadius: 16, backgroundColor: on ? T.primaryContainer : "transparent", alignItems: "center", justifyContent: "center" }}>
+          <Icon name={icon} size={22} color={on ? T.ink : T.inkSoft} />
+        </View>
+        <Text style={{ fontFamily: on ? FONT.bold : FONT.medium, fontSize: 12, color: on ? T.ink : T.inkSoft }}>{label}</Text>
       </Pressable>
     );
   };
   return (
-    <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: 22, alignItems: "center" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: T.ink, borderRadius: 30, paddingHorizontal: 8, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 24, shadowOffset: { width: 0, height: 14 }, elevation: 12, minWidth: 220 }}>
-        <Item k="home" label="Hem" icon="home" />
-        <Item k="discover" label="Ställen" icon="compass" />
-      </View>
+    <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: T.container, paddingTop: 12, paddingBottom: 16 + insets.bottom }}>
+      <Item k="home" label="Kort" icon="card" />
+      <Item k="discover" label="Ställen" icon="pin" />
     </View>
   );
 }

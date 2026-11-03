@@ -1,29 +1,49 @@
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Modal, Pressable, Animated, Easing, Dimensions, PanResponder, ActivityIndicator } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import { T, RADIUS, FONT } from "../lib/theme";
-import { Icon, CafeIcon } from "../lib/icons";
+import { T, FONT, tone as toneFor } from "../lib/theme";
+import { Icon } from "../lib/icons";
 import { saveReward, getCurrentSavedCode } from "../lib/supabase";
-import Confetti from "./Confetti";
+import Shape from "./Shape";
+import StampRow from "./StampRow";
 
-const { width: W } = Dimensions.get("window");
+const { width: W, height: H } = Dimensions.get("window");
+const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
 /* ──────────────────────────────────────────────────────────────
-   Stage 1: Locked envelope. Slide-to-reveal.
-   Stage 2: Code revealed. Customer shows it to staff.
-            Staff types it on their merchant page → backend marks redeemed.
-            App polls and updates automatically.
+   Inlösen i tre steg:
+   1. Låst  — ark med förklaring + "Dra för att visa koden". Att dra sparar
+              belöningen (save_reward) och ger koden.
+   2. Kod   — helskärm. Personalen skriver in koden i tappass.se/m; appen pollar
+              och märker när den är inlöst.
+   3. Inlöst — bekräftelse; kortet börjar om på 0.
    ────────────────────────────────────────────────────────────── */
 
 export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
-  const [stage, setStage] = useState("loading"); // loading | locked | revealed
+  const [stage, setStage] = useState("loading"); // loading | locked | revealed | redeemed
   const [code, setCode] = useState(null);
   const [offline, setOffline] = useState(false);
-  const slug = card?.slug;
+  const [saving, setSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+
+  // Kortet kan byta skepnad (eller försvinna) när plånboken laddas om efter
+  // inlösen — visa då senast kända kort så att bekräftelsen inte blinkar bort.
+  const snap = useRef(card);
+  if (card) snap.current = card;
+  const c = card || snap.current;
+  const slug = c?.slug;
 
   // Senaste onRedeemed utan att pollningen startar om vid varje omrendering i App.
   const onRedeemedRef = useRef(onRedeemed);
   useEffect(() => { onRedeemedRef.current = onRedeemed; });
+
+  // Stängd ruta glömmer sitt läge, så att nästa öppning aldrig hinner visa förra
+  // kortets kod eller "Inlöst!" en bildruta innan laddningen startar.
+  useEffect(() => {
+    if (!visible) { setStage("loading"); setCode(null); }
+  }, [visible]);
 
   // Vid öppning: hämta ev. redan sparad kod. Vid nätfel visas låst läge — att dra
   // anropar save_reward, som returnerar den sparade koden om den redan finns.
@@ -33,6 +53,8 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     let alive = true;
     setStage("loading");
     setOffline(false);
+    setSaving(false);
+    setSaveFailed(false);
     (async () => {
       const r = await getCurrentSavedCode(slug);
       if (!alive) return;
@@ -63,6 +85,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
         alive = false;
         if (timer) clearInterval(timer);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setStage("redeemed");
         onRedeemedRef.current(slug);
       }
     };
@@ -72,180 +95,285 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     return () => { alive = false; if (timer) clearInterval(timer); };
   }, [stage, slug, visible]);
 
-  if (!visible || !card) return null;
+  if (!visible || !c) return null;
 
   const handleReveal = async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setStage("loading");
-    const result = await saveReward(card.slug);
-    if (result.ok) {
+    setSaving(true);
+    setSaveFailed(false);
+    const result = await saveReward(c.slug);
+    setSaving(false);
+    if (result.ok && result.code) {
       setCode(result.code);
       setStage("revealed");
     } else {
-      setStage("locked");
+      setSaveFailed(true);   // nätfel e.d. — kunden kan dra igen
     }
   };
 
+  const t = toneFor(c.ink);
   return (
-    <Modal visible animationType="slide" transparent onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: card.deep }}>
-        <Pressable onPress={onClose} style={{ position: "absolute", top: 60, right: 22, zIndex: 100, width: 36, height: 36, borderRadius: 18, backgroundColor: "rgba(255,255,255,.12)", alignItems: "center", justifyContent: "center" }}>
-          <Icon name="close" size={20} color="#fff" strokeWidth={2} />
-        </Pressable>
-
-        {stage === "loading" && (
-          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-            <ActivityIndicator size="large" color={T.accent} />
-          </View>
-        )}
-        {stage === "locked" && <LockedStage card={card} onReveal={handleReveal} />}
-        {stage === "revealed" && <RevealedStage card={card} code={code} offline={offline} />}
-      </View>
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      {stage === "loading" || stage === "locked" ? (
+        <LockedSheet card={c} tone={t} loading={stage === "loading"} saving={saving} saveFailed={saveFailed} onReveal={handleReveal} onClose={onClose} />
+      ) : stage === "revealed" ? (
+        <CodeScreen card={c} tone={t} code={code} offline={offline} onClose={onClose} />
+      ) : (
+        <RedeemedScreen card={c} tone={t} onClose={onClose} />
+      )}
     </Modal>
   );
 }
 
-/* ────────────── STAGE 1 — LOCKED ENVELOPE ────────────── */
-function LockedStage({ card, onReveal }) {
-  const dragX = useRef(new Animated.Value(0)).current;
-  const float = useRef(new Animated.Value(0)).current;
-  const TRACK = W - 60;
-  const KNOB = 64;
-  const MAX = TRACK - KNOB - 6;
-
+/* ────────────── 1. LÅST — ARK MED "DRA FÖR ATT VISA KODEN" ────────────── */
+function LockedSheet({ card, tone: t, loading, saving, saveFailed, onReveal, onClose }) {
+  const insets = useSafeAreaInsets();
+  const rise = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.loop(Animated.sequence([
-      Animated.timing(float, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      Animated.timing(float, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-    ])).start();
+    Animated.spring(rise, { toValue: 1, friction: 9, tension: 60, useNativeDriver: true }).start();
   }, []);
+  const needed = Math.max(1, card.needed || 1);
+
+  return (
+    <View style={{ flex: 1, justifyContent: "flex-end" }}>
+      <Pressable accessibilityLabel="Stäng" onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: T.scrim }} />
+      <Animated.View style={{
+        backgroundColor: T.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+        paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 + insets.bottom,
+        transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [500, 0] }) }],
+      }}>
+        <View style={{ alignSelf: "center", width: 32, height: 4, borderRadius: 2, backgroundColor: T.outline }} />
+
+        <View style={{ marginTop: 20, flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <Shape kind="cookie9" size={48} color={t.primary}>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 19, color: "#FFFFFF" }}>{initialOf(card.name)}</Text>
+          </Shape>
+          <View style={{ flex: 1 }}>
+            <Text numberOfLines={1} style={{ fontFamily: FONT.medium, fontSize: 14, color: T.inkSoft }}>{card.name}</Text>
+            <Text style={{ fontFamily: FONT.title, fontSize: 24, lineHeight: 30, color: T.ink }}>{card.reward}</Text>
+          </View>
+        </View>
+
+        {loading ? (
+          <View style={{ height: 268, alignItems: "center", justifyContent: "center" }}>
+            <ActivityIndicator size="large" color={t.primary} />
+          </View>
+        ) : (
+          <View>
+            <View style={{ marginTop: 20 }}>
+              <StepRow tone={t} icon="phone" text="Visa koden när du står i kassan" />
+              <StepRow tone={t} icon="keyboard" text="Personalen skriver in den i kassan" />
+              <StepRow tone={t} icon="reset" text={"Kortet börjar om på 0/" + needed + " när koden är inlöst"} />
+            </View>
+            <RevealSlider tone={t} saving={saving} onReveal={onReveal} />
+            <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: saveFailed ? T.errorText : T.inkSoft, textAlign: "center", marginTop: 12 }}>
+              {saveFailed ? "Det gick inte att hämta koden. Kontrollera nätet och dra igen." : "Koden kan bara lösas in en gång."}
+            </Text>
+          </View>
+        )}
+      </Animated.View>
+    </View>
+  );
+}
+
+function StepRow({ tone: t, icon, text }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 14, minHeight: 56 }}>
+      <Shape kind="sunny8" size={40} color={t.container}>
+        <Icon name={icon} size={18} color={t.onContainer} />
+      </Shape>
+      <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 15, lineHeight: 21, color: T.ink }}>{text}</Text>
+    </View>
+  );
+}
+
+function RevealSlider({ tone: t, saving, onReveal }) {
+  const TRACK = Math.min(W, 520) - 48;   // arkets innerbredd
+  const KNOB = 56;
+  const MAX = TRACK - KNOB - 8;
+  const dragX = useRef(new Animated.Value(0)).current;
+  const savingRef = useRef(saving);
+  savingRef.current = saving;
+  const onRevealRef = useRef(onReveal);
+  onRevealRef.current = onReveal;
+
+  // Tillbaka till start när ett sparförsök är klart (lyckas det byts arket mot koden).
+  useEffect(() => {
+    if (!saving) Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start();
+  }, [saving]);
 
   const responder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => !savingRef.current,
+      onMoveShouldSetPanResponder: () => !savingRef.current,
       onPanResponderGrant: () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); },
-      onPanResponderMove: (_, g) => {
-        const x = Math.max(0, Math.min(MAX, g.dx));
-        dragX.setValue(x);
-      },
+      onPanResponderMove: (_, g) => { dragX.setValue(Math.max(0, Math.min(MAX, g.dx))); },
       onPanResponderRelease: (_, g) => {
         const x = Math.max(0, Math.min(MAX, g.dx));
         if (x >= MAX * 0.85) {
-          Animated.timing(dragX, { toValue: MAX, duration: 120, useNativeDriver: false }).start(() => onReveal());
+          Animated.timing(dragX, { toValue: MAX, duration: 120, useNativeDriver: false }).start(() => onRevealRef.current());
         } else {
           Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start();
         }
       },
+      onPanResponderTerminate: () => { Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start(); },
     })
   ).current;
 
   return (
-    <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 120, alignItems: "center" }}>
-      <Text style={{ fontFamily: FONT.uiBold, fontSize: 11, color: T.accent, letterSpacing: 2 }}>DU HAR LÅST UPP EN BELÖNING</Text>
-      <Text style={{ fontFamily: FONT.display, fontSize: 44, color: "#fff", textAlign: "center", marginTop: 14, lineHeight: 46 }}>{card.reward}</Text>
-      <Text style={{ fontFamily: FONT.ui, fontSize: 15, color: "rgba(255,255,255,.6)", marginTop: 8 }}>hos {card.name}</Text>
-
-      <Animated.View style={{ marginTop: 60, transform: [{ translateY: float.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) }] }}>
-        <Envelope card={card} />
+    <View
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel="Dra för att visa koden"
+      accessibilityActions={[{ name: "activate", label: "Visa koden" }]}
+      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === "activate" && !savingRef.current) onRevealRef.current(); }}
+      style={{ marginTop: 22, width: TRACK, height: 64, borderRadius: 32, backgroundColor: T.container, alignItems: "center", justifyContent: "center" }}
+    >
+      <Animated.Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.inkSoft, opacity: dragX.interpolate({ inputRange: [0, MAX * 0.6], outputRange: [1, 0], extrapolate: "clamp" }) }}>
+        Dra för att visa koden
+      </Animated.Text>
+      <View pointerEvents="none" style={{ position: "absolute", right: 20, top: 22 }}>
+        <Icon name="chevrons" size={20} color="#A9AB9C" strokeWidth={2.2} />
+      </View>
+      <Animated.View {...responder.panHandlers} style={{ position: "absolute", left: 4, top: 4, transform: [{ translateX: dragX }] }}>
+        <Shape kind="cookie9" size={KNOB} color={t.primary}>
+          {saving
+            ? <ActivityIndicator size="small" color="#FFFFFF" />
+            : <Icon name="arrow" size={24} color="#FFFFFF" strokeWidth={2.4} />}
+        </Shape>
       </Animated.View>
-
-      <View style={{ flex: 1 }} />
-
-      <View style={{ width: TRACK, height: KNOB + 6, borderRadius: (KNOB + 6) / 2, backgroundColor: "rgba(255,255,255,.08)", borderWidth: 1, borderColor: "rgba(255,255,255,.14)", marginBottom: 50, justifyContent: "center", overflow: "hidden" }}>
-        <Animated.View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: dragX.interpolate({ inputRange: [0, MAX], outputRange: [KNOB + 6, TRACK] }), backgroundColor: T.accent, opacity: dragX.interpolate({ inputRange: [0, MAX], outputRange: [0.2, 0.7] }) }} />
-        <Animated.Text style={{ fontFamily: FONT.uiMed, fontSize: 14, color: "#fff", textAlign: "center", letterSpacing: 0.5, opacity: dragX.interpolate({ inputRange: [0, MAX * 0.6], outputRange: [0.85, 0] }) }}>
-          Dra för att öppna ›››
-        </Animated.Text>
-        <Animated.View {...responder.panHandlers} style={{ position: "absolute", left: 3, top: 3, width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: T.accent, alignItems: "center", justifyContent: "center", transform: [{ translateX: dragX }], shadowColor: T.accent, shadowOpacity: 0.6, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 8 }}>
-          <Icon name="arrowOut" size={26} color={T.accentInk} strokeWidth={2.4} />
-        </Animated.View>
-      </View>
     </View>
   );
 }
 
-function Envelope({ card }) {
-  return (
-    <View style={{ width: 230, height: 150, borderRadius: 14, backgroundColor: T.accent, alignItems: "center", justifyContent: "center", shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 30, shadowOffset: { width: 0, height: 16 }, elevation: 10 }}>
-      <View style={{ position: "absolute", top: 0, left: 0, right: 0, height: 75, borderTopLeftRadius: 14, borderTopRightRadius: 14, backgroundColor: T.accentDark, transform: [{ skewY: "-8deg" }, { translateY: -8 }], opacity: 0.85 }} />
-      <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: card.deep, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: T.accent }}>
-        <Icon name="gift" size={22} color={T.accent} strokeWidth={1.8} />
-      </View>
-    </View>
-  );
-}
-
-/* ────────────── STAGE 2 — REVEALED CODE ────────────── */
-function RevealedStage({ card, code, offline }) {
-  const slide = useRef(new Animated.Value(0)).current;
-  const pulse = useRef(new Animated.Value(0)).current;
+/* ────────────── 2. KODEN — HELSKÄRM ────────────── */
+function CodeScreen({ card, tone: t, code, offline, onClose }) {
+  const insets = useSafeAreaInsets();
+  const pop = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.spring(slide, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
-    Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1, duration: 1600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 0, duration: 1600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-    ])).start();
+    Animated.spring(pop, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
   }, []);
 
-  // Format code as "482 · 917" for readability
-  const displayCode = code ? code.slice(0, 3) + "  " + code.slice(3) : "······";
+  // Formen skalas ner på låga skärmar så att allt får plats utan att skrolla.
+  const S = Math.round(Math.min(320, W - 40, H * 0.42));
+  const lines = code ? code.slice(0, 3) + "\n" + code.slice(3) : "···\n···";
 
   return (
-    <View style={{ flex: 1, paddingHorizontal: 22, paddingTop: 80, justifyContent: "space-between" }}>
-      <View style={{ alignItems: "center" }}>
-        <Text style={{ fontFamily: FONT.uiBold, fontSize: 11, color: T.accent, letterSpacing: 2 }}>VISA FÖR PERSONALEN</Text>
-        <Text style={{ fontFamily: FONT.display, fontSize: 26, color: "#fff", marginTop: 6 }}>Din belöningskod</Text>
+    <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
+      <View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Pressable accessibilityLabel="Stäng" onPress={onClose} style={{ width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" }}>
+          <Icon name="close" size={24} color={T.ink} />
+        </Pressable>
+        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONT.medium, fontSize: 22, color: T.ink }}>{card.name}</Text>
       </View>
 
-      <Animated.View style={{
-        transform: [
-          { translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) },
-          { scale: slide.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
-        ],
-        opacity: slide,
-      }}>
-        <View style={{ backgroundColor: T.bg, borderRadius: RADIUS.lg, padding: 28, shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 30, shadowOffset: { width: 0, height: 14 }, elevation: 14 }}>
-          <View style={{ position: "absolute", left: -8, top: 78, width: 16, height: 16, borderRadius: 8, backgroundColor: card.deep }} />
-          <View style={{ position: "absolute", right: -8, top: 78, width: 16, height: 16, borderRadius: 8, backgroundColor: card.deep }} />
+      <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
+        <Animated.View style={{ width: S, height: S, alignItems: "center", justifyContent: "center", opacity: pop, transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }}>
+          <Shape kind="sunny8" size={Math.round(S * 1.04)} color={t.light} rotate={12} style={{ position: "absolute", left: -Math.round(S * 0.02), top: -Math.round(S * 0.02) }} />
+          <Shape kind="cookie12" size={Math.round(S * 0.94)} color={t.container} style={{ position: "absolute", left: Math.round(S * 0.03), top: Math.round(S * 0.03) }} />
+          <Text style={{ fontFamily: FONT.bold, fontSize: 12, letterSpacing: 1.44, color: t.muted }}>DIN KOD</Text>
+          <Text
+            accessibilityLabel={"Kod " + (code ? code.split("").join(" ") : "")}
+            style={{ marginTop: 6, fontFamily: FONT.display, fontSize: Math.round(S * 0.275), lineHeight: Math.round(S * 0.265), textAlign: "center", color: t.onContainer }}
+          >{lines}</Text>
+        </Animated.View>
 
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: card.soft, alignItems: "center", justifyContent: "center" }}>
-              <CafeIcon symbol={card.symbol} size={20} color={card.ink} strokeWidth={1.6} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: FONT.uiMed, fontSize: 12, color: T.inkMute, letterSpacing: 1 }}>{card.name.toUpperCase()}</Text>
-              <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.inkFaint, marginTop: 1 }}>{card.reward}</Text>
-            </View>
-          </View>
+        <Text style={{ marginTop: 24, fontFamily: FONT.title, fontSize: 26, lineHeight: 31, textAlign: "center", color: T.ink }}>{card.reward}</Text>
+        <Text style={{ marginTop: 6, fontFamily: FONT.regular, fontSize: 16, lineHeight: 22, color: T.inkSoft, textAlign: "center" }}>Visa koden för personalen i kassan.</Text>
 
-          {/* The big code */}
-          <View style={{ marginTop: 36, alignItems: "center", paddingTop: 28, paddingBottom: 24, borderTopWidth: 1, borderTopColor: T.hairline, borderStyle: "dashed", borderBottomWidth: 1, borderBottomColor: T.hairline }}>
-            <Text style={{ fontFamily: FONT.uiBold, fontSize: 10, color: T.inkMute, letterSpacing: 1.8 }}>SÄG ELLER VISA DENNA KOD</Text>
-            <Animated.Text style={{
-              fontFamily: FONT.mono,
-              fontSize: 54,
-              color: T.ink,
-              letterSpacing: 6,
-              marginTop: 12,
-              opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }),
-            }}>{displayCode}</Animated.Text>
-          </View>
-
-          <View style={{ marginTop: 22, flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <ActivityIndicator size="small" color={T.inkMute} />
-            <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: offline ? T.warn : T.inkMute, flex: 1 }}>
-              {offline ? "Ingen anslutning — koden gäller ändå. Försöker igen…" : "Väntar på att personalen ska bekräfta…"}
-            </Text>
-          </View>
+        <View style={{ marginTop: 28, alignItems: "center", gap: 10 }}>
+          <Text style={{ fontFamily: FONT.semibold, fontSize: 15, lineHeight: 20, color: offline ? T.errorText : T.ink, textAlign: "center" }}>
+            {offline ? "Ingen anslutning — koden gäller ändå. Försöker igen…" : "Väntar på bekräftelse"}
+          </Text>
+          <WaveProgress color={t.primary} width={Math.min(310, W - 64)} />
         </View>
-      </Animated.View>
+      </View>
 
-      <View style={{ marginBottom: 40, alignItems: "center" }}>
-        <Text style={{ fontFamily: FONT.ui, fontSize: 13, color: "rgba(255,255,255,.55)", textAlign: "center", lineHeight: 19, maxWidth: 280 }}>
-          Personalen skriver in koden i sin TapPass-panel. Skärmen uppdateras automatiskt när det är klart.
+      <View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.container }}>
+        <Icon name="info" size={20} color={T.inkSoft} />
+        <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>
+          Nya stämplar hos {card.name} pausas tills koden är inlöst.
         </Text>
       </View>
+    </View>
+  );
+}
+
+// Vågig, löpande linje medan appen väntar på personalen (Material 3 Expressive).
+function WaveProgress({ color, width }) {
+  const x = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const anim = Animated.loop(Animated.timing(x, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: true }));
+    anim.start();
+    return () => anim.stop();
+  }, []);
+  const PERIOD = 18;
+  const w = width + PERIOD;
+  return (
+    <View style={{ width, height: 12, overflow: "hidden" }}>
+      <Animated.View style={{ width: w, height: 12, transform: [{ translateX: x.interpolate({ inputRange: [0, 1], outputRange: [0, -PERIOD] }) }] }}>
+        <Svg width={w} height={12} viewBox={"0 0 " + w + " 12"}>
+          <Path d={wavePath(w)} stroke={color} strokeWidth={4} strokeLinecap="round" fill="none" />
+        </Svg>
+      </Animated.View>
+    </View>
+  );
+}
+
+function wavePath(w) {
+  let d = "M2 6Q6.5 1.5 11 6";
+  for (let x = 20; x <= w - 2; x += 9) d += "T" + x + " 6";
+  return d;
+}
+
+/* ────────────── 3. INLÖST ────────────── */
+function RedeemedScreen({ card, tone: t, onClose }) {
+  const insets = useSafeAreaInsets();
+  const pop = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(pop, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }).start();
+  }, []);
+  const needed = Math.max(1, card.needed || 1);
+
+  return (
+    <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
+      <Pressable accessibilityLabel="Stäng" onPress={onClose} style={{ alignSelf: "flex-end", width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" }}>
+        <Icon name="close" size={24} color={T.ink} />
+      </Pressable>
+
+      <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
+        <Animated.View style={{ width: 240, height: 240, alignItems: "center", justifyContent: "center", transform: [{ scale: pop }] }}>
+          <Shape kind="sunny8" size={240} color={t.container} rotate={8} style={{ position: "absolute", left: 0, top: 0 }} />
+          <Shape kind="cookie12" size={180} color={t.primary}>
+            <Icon name="check" size={84} color="#FFFFFF" strokeWidth={2.6} />
+          </Shape>
+        </Animated.View>
+
+        <Text style={{ marginTop: 28, fontFamily: FONT.title, fontSize: 45, lineHeight: 52, color: T.ink }}>Inlöst!</Text>
+        <Text style={{ marginTop: 8, maxWidth: 300, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }}>
+          Smaklig måltid! Ditt kort hos {card.name} börjar om från noll.
+        </Text>
+
+        <View style={{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Shape kind="cookie9" size={36} color={t.primary}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: "#FFFFFF" }}>{initialOf(card.name)}</Text>
+            </Shape>
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 16, color: t.onContainer }}>{card.name}</Text>
+              <Text style={{ fontFamily: FONT.regular, fontSize: 13, color: t.muted }}>Nästa belöning efter {needed} stämplar</Text>
+            </View>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>0/{needed}</Text>
+          </View>
+          <View style={{ marginTop: 12 }}>
+            <StampRow total={needed} filled={0} tone={t} size={24} />
+          </View>
+        </View>
+      </View>
+
+      <Pressable onPress={onClose} accessibilityRole="button" style={({ pressed }) => ({ alignSelf: "stretch", height: 56, borderRadius: 28, backgroundColor: t.primary, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}>
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Tillbaka till korten</Text>
+      </Pressable>
     </View>
   );
 }
