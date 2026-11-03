@@ -10,7 +10,7 @@ Kontext för AI-assistenter och nya utvecklare. Hålls uppdaterad vid större f�
 Webben ligger *inte* här:
 
 - `tappass.se` (marknadssajt) och `tappass.se/m` (butiks-/merchant-dashboard) är byggda i **Lovable** och versionshanteras separat.
-- Backend är **Supabase** (Postgres + RPC-funktioner). SQL-filerna i repo-roten är källan till schemat men körs manuellt i Supabase SQL Editor — det finns ingen migrations-pipeline.
+- Backend är **Supabase** (Postgres + RPC-funktioner). SQL-filerna i repo-roten dokumenterar schemat men är inte exakt facit (produktion har ändrats manuellt — se Säkerhetsmodell). De körs manuellt i Supabase SQL Editor — det finns ingen migrations-pipeline.
 
 ## Stack
 
@@ -34,7 +34,8 @@ app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin
 eas.json                     # EAS-byggprofiler (development/preview/production)
 supabase_schema.sql          # v1-schema: cafes, tags, users, stamps, redemptions + tap_token m.fl.
 supabase_migration_v2.sql    # v2: cafe_pins (bcrypt-PIN), redeem-koder, merchant_*-RPC:er
-supabase_migration_v3.sql    # v3: cooldown i tap_token, PIN-lockout, tags-policy bort, tag_public_info
+supabase_migration_v3.sql    # v3: cooldown i tap_token, PIN-lockout … — EJ KÖRD, se varningen i filen
+supabase_migration_v4_security.sql # v4: säkerhetsfix — kod kräver fullt kort, redeem_reward stängd, taggar ej listbara
 src/
   lib/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
@@ -94,7 +95,11 @@ Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `caf
 - Publishable-nyckeln i `src/lib/supabase.js` är avsedd att vara publik; alla skrivningar går genom RPC:er som validerar (PIN:er bcrypt-hashade i `cafe_pins`).
 - `service_role`-nyckeln får ALDRIG hamna i appen eller i Lovable.
 - Butiks-PIN:er får ALDRIG committas (inte i SQL, README eller kommentarer). Sätt dem manuellt i SQL Editor.
-- `tap_token` svarar `error: "cooldown"` om samma enhet stämplat hos samma café inom `cafes.stamp_cooldown_minutes` (default 120). Appen visar det som info, inte fel.
+- **Produktion är facit, inte repots SQL.** Live-databasen har ändrats manuellt och skiljer sig från v1/v2-filerna (t.ex. har `cafe_pins` RLS i produktion men inte i v2-filen). Hämta `pg_get_functiondef` innan en funktion skrivs om.
+- **v4 (`supabase_migration_v4_security.sql`):** `save_reward` kräver fullt kort; `redeem_reward` är stängd för klientroller — bara personalen löser in (`merchant_redeem_by_code`); `tags` är inte läsbar för klienter (publik butiksinfo per token via `tag_public_info`, används av tappass.se/t/…); `search_path` låst på alla RPC:er. Appens anrop till `redeem_reward` i `onRedeemed` får behörighetsfel som ignoreras — bör tas bort i appen.
+- **Ingen cooldown i produktion:** v3 är inte körd, så samma enhet kan stämpla obegränsat, och token är gissningsbara (`<slug>-01`). Appen hanterar redan `error: "cooldown"` för när v3:s cooldown slås på.
+- **PIN-inloggningen** (`merchant_*`) saknar spärr mot gissning på serversidan; tappass.se/m:s 30-sekundersspärr ligger i webbläsaren och går att kringgå.
+- **Supabase free plan** pausar projektet efter 7 dagar utan trafik → app och butikspanel slutar svara tills det återstartas.
 - `.env` är gitignorad men används inte i dag — Supabase-URL/nyckel är hårdkodade.
 
 ## Kända begränsningar
