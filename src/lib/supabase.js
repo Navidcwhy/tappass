@@ -37,28 +37,35 @@ export async function tapToken(token) {
   }
 }
 
-// Save reward — now returns { ok, code } so we can show the redemption code
+// Spara belöning → { ok, code }. Servern kräver fullt kort och returnerar
+// samma kod om belöningen redan är sparad. Nät-/serverfel → { ok: false }.
 export async function saveReward(cafeSlug) {
-  const device_id = await getDeviceId();
-  const { data, error } = await supabase.rpc("save_reward", { p_device_id: device_id, p_cafe_slug: cafeSlug });
-  if (error) return { ok: false, error: error.message };
-  return data;
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await supabase.rpc("save_reward", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+    if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
 }
 
-// Redeem reward (customer-side hold-to-redeem)
-export async function redeemReward(cafeSlug) {
-  const device_id = await getDeviceId();
-  const { data, error } = await supabase.rpc("redeem_reward", { p_device_id: device_id, p_cafe_slug: cafeSlug });
-  if (error) return { ok: false, error: error.message };
-  return data;
-}
+// Inlösen görs bara av personalen (merchant_redeem_by_code i tappass.se/m).
+// Appens gamla redeem_reward-anrop är borttaget — servern stängde det i v4.
 
-// Get the existing saved code (so the card can re-display it after app restart)
+// Sparad kod för ett kort.
+//   { ok: true, code: "123456" } — belöningen väntar på inlösen
+//   { ok: true, code: null }     — ingen sparad belöning (t.ex. personalen har löst in)
+//   { ok: false }                — nät-/serverfel: vi vet INGENTING, tolka det aldrig som inlöst
 export async function getCurrentSavedCode(cafeSlug) {
-  const device_id = await getDeviceId();
-  const { data, error } = await supabase.rpc("current_saved_code", { p_device_id: device_id, p_cafe_slug: cafeSlug });
-  if (error) return null;
-  return data?.code || null;
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await supabase.rpc("current_saved_code", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+    if (error || !data || data.ok !== true) return { ok: false };
+    return { ok: true, code: data.code || null };
+  } catch {
+    return { ok: false };
+  }
 }
 
 export async function loadWallet() {
