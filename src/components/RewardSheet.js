@@ -18,54 +18,59 @@ const { width: W } = Dimensions.get("window");
 export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
   const [stage, setStage] = useState("loading"); // loading | locked | revealed
   const [code, setCode] = useState(null);
-  const pollRef = useRef(null);
+  const [offline, setOffline] = useState(false);
+  const slug = card?.slug;
 
-// When opened: fetch existing saved code from backend (if any)
+  // Senaste onRedeemed utan att pollningen startar om vid varje omrendering i App.
+  const onRedeemedRef = useRef(onRedeemed);
+  useEffect(() => { onRedeemedRef.current = onRedeemed; });
+
+  // Vid öppning: hämta ev. redan sparad kod. Vid nätfel visas låst läge — att dra
+  // anropar save_reward, som returnerar den sparade koden om den redan finns.
+  // Beroende på slug (inte card-objektet) så att en uppdaterad plånbok inte laddar om rutan.
   useEffect(() => {
-    if (!visible || !card) return;
+    if (!visible || !slug) return;
     let alive = true;
     setStage("loading");
+    setOffline(false);
     (async () => {
-      const existing = await getCurrentSavedCode(card.slug);
+      const r = await getCurrentSavedCode(slug);
       if (!alive) return;
-      if (existing) {
-        setCode(existing);
+      if (r.ok && r.code) {
+        setCode(r.code);
         setStage("revealed");
       } else {
         setStage("locked");
       }
     })();
     return () => { alive = false; };
-  }, [visible, card]);
+  }, [visible, slug]);
 
-  // Poll backend every 2 seconds when code is shown — to detect when staff redeems
+  // Polla varannan sekund medan koden visas, för att märka när personalen löst in.
+  // Bara ett säkert svar "ingen sparad kod" räknas som inlöst. Ett nätfel stänger
+  // aldrig rutan — kunden ska kunna visa koden även i en kassa med dålig täckning.
   useEffect(() => {
-    if (stage !== "revealed" || !card || !visible) return;
+    if (stage !== "revealed" || !slug || !visible) return;
     let alive = true;
     let timer = null;
 
     const check = async () => {
+      const r = await getCurrentSavedCode(slug);
       if (!alive) return;
-      try {
-        const c = await getCurrentSavedCode(card.slug);
-        if (!alive) return;
-        console.log("[TapPass] poll for", card.slug, "→ code:", c);
-        if (!c) {
-          // Code is gone → staff redeemed it
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          if (timer) clearInterval(timer);
-          onRedeemed(card.slug);
-        }
-      } catch (e) {
-        console.log("[TapPass] poll error:", e?.message);
+      if (!r.ok) { setOffline(true); return; }
+      setOffline(false);
+      if (!r.code) {
+        alive = false;
+        if (timer) clearInterval(timer);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onRedeemedRef.current(slug);
       }
     };
 
-    // First check immediately, then every 2 sec
     check();
     timer = setInterval(check, 2000);
     return () => { alive = false; if (timer) clearInterval(timer); };
-  }, [stage, card, visible, onRedeemed]);
+  }, [stage, slug, visible]);
 
   if (!visible || !card) return null;
 
@@ -94,7 +99,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
           </View>
         )}
         {stage === "locked" && <LockedStage card={card} onReveal={handleReveal} />}
-        {stage === "revealed" && <RevealedStage card={card} code={code} />}
+        {stage === "revealed" && <RevealedStage card={card} code={code} offline={offline} />}
       </View>
     </Modal>
   );
@@ -172,7 +177,7 @@ function Envelope({ card }) {
 }
 
 /* ────────────── STAGE 2 — REVEALED CODE ────────────── */
-function RevealedStage({ card, code }) {
+function RevealedStage({ card, code, offline }) {
   const slide = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -229,8 +234,8 @@ function RevealedStage({ card, code }) {
 
           <View style={{ marginTop: 22, flexDirection: "row", alignItems: "center", gap: 10 }}>
             <ActivityIndicator size="small" color={T.inkMute} />
-            <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: T.inkMute, flex: 1 }}>
-              Väntar på att personalen ska bekräfta…
+            <Text style={{ fontFamily: FONT.ui, fontSize: 12, color: offline ? T.warn : T.inkMute, flex: 1 }}>
+              {offline ? "Ingen anslutning — koden gäller ändå. Försöker igen…" : "Väntar på att personalen ska bekräfta…"}
             </Text>
           </View>
         </View>

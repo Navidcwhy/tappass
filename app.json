@@ -29,17 +29,9 @@
           ],
           "data": [
             {
-              "scheme": "tappass"
-            },
-            {
               "scheme": "https",
               "host": "tappass.se",
-              "pathPrefix": "/t"
-            },
-            {
-              "scheme": "https",
-              "host": "www.tappass.se",
-              "pathPrefix": "/t"
+              "pathPrefix": "/t/"
             }
           ],
           "autoVerify": true
@@ -77,7 +69,8 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200
         }
-      ]
+      ],
+      "./plugins/withLaunchedFromHistoryFix"
     ],
     "extra": {
       "eas": {

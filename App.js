@@ -10,7 +10,7 @@ import { T, RADIUS, FONT, FONT_FILES } from "./src/lib/theme";
 import { Icon, CafeIcon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
-import { tapToken, saveReward, redeemReward, loadWallet, loadCafes } from "./src/lib/supabase";
+import { tapToken, saveReward, loadWallet, loadCafes } from "./src/lib/supabase";
 import { hasOnboarded, markOnboarded } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import LoyaltyCard from "./src/components/LoyaltyCard";
@@ -233,6 +233,10 @@ export default function App() {
 
   const cards = Object.values(wallet);
   const pendingCards = cards.filter((c) => c.pendingReward);
+  // Fullt kort som inte sparats (kodrutan stängd före "dra för att öppna",
+  // misslyckat sparande, appen stängd under firandet). Måste synas — annars
+  // finns belöningen bara i databasen och kunden hittar den aldrig.
+  const readyCards = cards.filter((c) => !c.pendingReward && c.stamps >= c.needed);
   const progressCards = cards.filter((c) => !c.pendingReward && c.stamps < c.needed);
   const discover = allCafes.filter((b) => !wallet[b.slug]);
   const totalStamps = cards.reduce((s, c) => s + c.stamps, 0);
@@ -248,9 +252,9 @@ export default function App() {
     setRewardId(celebrationId);
     setCelebrationId(null);
   };
-  const onRedeemed = async (slug) => {
+  // Personalen har löst in (koden försvann på servern) → hämta nytt kortläge.
+  const onRedeemed = async () => {
     setLoadingAction(true);
-    await redeemReward(slug);
     await refreshWallet();
     setLoadingAction(false);
     setRewardId(null);
@@ -278,6 +282,7 @@ export default function App() {
             <HomeWithScanner
               nfc={nfc}
               pendingCards={pendingCards}
+              readyCards={readyCards}
               progressCards={progressCards}
               totalStamps={totalStamps}
               onSimulate={simulateStamp}
@@ -316,8 +321,9 @@ function Header({ onSettings, loading }) {
   );
 }
 
-function HomeWithScanner({ nfc, pendingCards, progressCards, totalStamps, onSimulate, onSendTap, onOpenReward, hasCards, cafes }) {
-  const cardCount = pendingCards.length + progressCards.length;
+function HomeWithScanner({ nfc, pendingCards, readyCards, progressCards, totalStamps, onSimulate, onSendTap, onOpenReward, hasCards, cafes }) {
+  const cardCount = pendingCards.length + readyCards.length + progressCards.length;
+  const rewardCount = pendingCards.length + readyCards.length;
 
   return (
     <View>
@@ -350,7 +356,16 @@ function HomeWithScanner({ nfc, pendingCards, progressCards, totalStamps, onSimu
           <View style={{ width: 1, backgroundColor: T.hairline }} />
           <Stat label="Stämplar totalt" value={totalStamps} />
           <View style={{ width: 1, backgroundColor: T.hairline }} />
-          <Stat label="Sparade belöningar" value={pendingCards.length} accent={pendingCards.length > 0} />
+          <Stat label="Belöningar" value={rewardCount} accent={rewardCount > 0} />
+        </View>
+      )}
+
+      {readyCards.length > 0 && (
+        <View style={{ marginBottom: 22 }}>
+          <SectionLabel text="Belöning klar" />
+          <View style={{ gap: 14, marginTop: 12 }}>
+            {readyCards.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
+          </View>
         </View>
       )}
 
