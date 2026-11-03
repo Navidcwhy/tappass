@@ -1,26 +1,28 @@
 import React from "react";
 import {
-  Home, Compass, Plus, Gift, Coffee, Croissant, Utensils, Leaf, IceCream,
-  ChevronRight, X, Search, Clock, MapPin, Check, Sparkles, Wifi, ArrowUpRight,
-  Lock, Unlock, ScanLine, RotateCw, Star,
+  CreditCard, MapPin, CircleHelp, X, Check, ArrowRight, Nfc, Search, Gift, Timer,
+  WifiOff, CircleAlert, Smartphone, Keyboard, RotateCcw, ChevronsRight, ChevronRight,
+  Megaphone, Info, Link, Share2, ScanLine,
+  Coffee, Croissant, Utensils, Leaf, IceCream,
 } from "lucide-react-native";
 
 const CAFE = { coffee: Coffee, croissant: Croissant, utensils: Utensils, leaf: Leaf, icecream: IceCream };
 
-export const Icon = ({ name, size = 22, color = "#1A1612", strokeWidth = 1.6 }) => {
-  const map = {
-    home: Home, compass: Compass, plus: Plus, gift: Gift,
-    chev: ChevronRight, close: X, search: Search, clock: Clock, pin: MapPin,
-    check: Check, sparkles: Sparkles, wifi: Wifi, arrowOut: ArrowUpRight,
-    lock: Lock, unlock: Unlock, scan: ScanLine, rotate: RotateCw, star: Star,
-    ...CAFE,
-  };
-  const C = map[name];
+const MAP = {
+  card: CreditCard, pin: MapPin, help: CircleHelp, close: X, check: Check, arrow: ArrowRight,
+  nfc: Nfc, search: Search, gift: Gift, timer: Timer, wifiOff: WifiOff, alert: CircleAlert,
+  phone: Smartphone, keyboard: Keyboard, reset: RotateCcw, chevrons: ChevronsRight,
+  chev: ChevronRight, megaphone: Megaphone, info: Info, link: Link, share: Share2, scan: ScanLine,
+  ...CAFE,
+};
+
+export const Icon = ({ name, size = 22, color = "#1B1C17", strokeWidth = 2 }) => {
+  const C = MAP[name];
   if (!C) return null;
   return <C size={size} color={color} strokeWidth={strokeWidth} />;
 };
 
-export const CafeIcon = ({ symbol, size = 24, color = "#1A1612", strokeWidth = 1.6 }) => {
+export const CafeIcon = ({ symbol, size = 24, color = "#1B1C17", strokeWidth = 2 }) => {
   const C = CAFE[symbol] || Coffee;
   return <C size={size} color={color} strokeWidth={strokeWidth} />;
 };

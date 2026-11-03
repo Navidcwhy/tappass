@@ -20,7 +20,7 @@ Webben ligger *inte* här:
 | NFC | `react-native-nfc-manager` 3.14.x (kräver dev client — Expo Go stöder inte NFC) |
 | Backend | Supabase via `@supabase/supabase-js` — all skrivlogik i `SECURITY DEFINER`-RPC:er |
 | Lagring | AsyncStorage (endast anonymt `device_id`) |
-| UI | Egna komponenter, `lucide-react-native`-ikoner, `Animated` (core) + reanimated-plugin i babel |
+| UI | Design **K · Expressiv** (Material 3 Expressive-inspirerad): egna komponenter, mjuka SVG-former via `react-native-svg`, `lucide-react-native`-ikoner, Roboto Flex (inbäddad i `assets/fonts`), `Animated` (core) + reanimated-plugin i babel. Designkanvas: https://claude.ai/artifact/697PMi2d6zDwCC1asagsqN |
 | Bygg | EAS Build (projectId i `app.json`), profiler i `eas.json` |
 | OTA | EAS Update (`expo-updates`): JS-ändringar pushas till användare utan App Store-granskning. `runtimeVersion.policy: "appVersion"` — OTA når alla builds med samma `expo.version`. Kanaler: `production`/`preview` (eas.json) |
 
@@ -29,7 +29,7 @@ Ingen TypeScript, ingen linter, inga tester, ingen CI. Ren JavaScript med inline
 ## Struktur och nyckelfiler
 
 ```
-App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar, toast
+App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar (Kort/Ställen), snackbar, stämpelark
 app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin, deep links
 eas.json                     # EAS-byggprofiler (development/preview/production)
 supabase_schema.sql          # v1-schema: cafes, tags, users, stamps, redemptions + tap_token m.fl.
@@ -44,21 +44,27 @@ src/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
     useNfcStatus.js          # Hook: pollar isSupported/isEnabled varannan sekund
     supabase.js              # Supabase-klient + RPC-wrappers (tapToken, saveReward, loadWallet …)
-    theme.js                 # Designtokens ("Aesop meets Stripe") + fontURL:er (Google Fonts)
+    theme.js                 # K · Expressiv: tokens (T, RADIUS, FONT), FONT_FILES (inbäddad Roboto Flex) + tone(ink) = palett per butik
+    shapes.js                # Genererade SVG-banor (cookie9/12, sunny8, burst12, flower8, clover4) i 100×100-viewBox
     icons.js                 # Lucide-ikonmappning
     prefs.js                 # Lokala UI-inställningar i AsyncStorage (onboarding-flagga)
   components/
-    LoyaltyCard.js           # Stämpelkort med progress, "BELÖNING KLAR"- och "SPARAD"-lägen
-    RewardSheet.js           # Inlösen: dra-för-att-öppna → 6-siffrig kod → pollar tills personal bekräftar (nätfel ≠ inlöst)
-    CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad
-    Confetti.js              # Konfettianimation
-    AppLinkOnboarding.js     # Onboarding, plattformsgrenad (Android App Links vs iOS Universal Links/skanna)
+    Shape.js                 # En mjuk form i en färg med valfritt innehåll ovanpå (grundbyggstenen i designen)
+    StampRow.js              # Stämpelrad: fyllda "cookies" med bock, tomma i dekorton, pop-animation för nyaste
+    LoyaltyCard.js           # Stämpelkort med progress, "BELÖNING KLAR"- och "SPARAD BELÖNING"-lägen
+    StampSheet.js            # Bottenark "+1" efter lyckad stämpel (stänger sig själv efter 4,5 s)
+    Snackbar.js              # Meddelanden: nätfel (med "Försök igen"), sparad belöning blockerar, okänd stämpel, väntetid
+    RewardSheet.js           # Inlösen: låst ark (dra för att visa) → 6-siffrig kod → pollar → "Inlöst!" (nätfel ≠ inlöst)
+    CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad: "Visa koden nu" eller "Spara till senare"
+    Confetti.js              # Konfetti av designens former
+    AppLinkOnboarding.js     # Välkomstskärm + steg, plattformsgrenad (Android App Links vs iOS Universal Links/skanna)
+    BrandMark.js             # TapPass-symbolen (lime-punkt + radarbågar) som vektor
 ```
 
 ## Dataflöde (kärnan)
 
 1. **Stämpel:** NFC-tagg innehåller token (`<slug>-01`, t.ex. `miyabi-01`) som text- eller URL-record (`https://tappass.se/t/<token>`). Appen läser den via `LiveScanner` i `App.js` — som plattformsgrenar: **Android** kör en passiv läsloop (`AndroidScanner`), **iOS** en knapptriggad en-session-per-tryck (`IosScanner`, Core NFC saknar tyst förgrundsläsning). Alternativt tas token emot som deep link (`tokenFromUrl` matchar `/t/<token>`). Alla vägar anropar `tap_token`-RPC:n som atomiskt löser token → café, skapar/hämtar user på `device_id`, blockerar om sparad belöning finns, och returnerar nytt kortläge.
-2. **Belöning:** Full rad → `CelebrationScreen` → `save_reward` genererar 6-siffrig kod → `RewardSheet` visar koden och pollar `current_saved_code` varannan sekund. Personalen skriver koden i tappass.se/m (`merchant_redeem_by_code`) → koden försvinner → appen märker det och nollställer kortet.
+2. **Belöning:** Full rad → `CelebrationScreen` → "Visa koden nu" eller "Spara till senare" → `save_reward` genererar 6-siffrig kod → `RewardSheet` visar koden (sparad belöning: först låst ark, kunden drar för att visa) och pollar `current_saved_code` varannan sekund. Personalen skriver koden i tappass.se/m (`merchant_redeem_by_code`) → koden försvinner → appen visar "Inlöst!" och kortet börjar om på 0.
 3. **Identitet:** Inget konto. Slumpat `device_id` i AsyncStorage = användaren. Ominstallation ⇒ nytt id ⇒ stämplarna "försvinner" för användaren (raderna finns kvar i Supabase men går inte att koppla).
 
 ## Bygga och köra lokalt
@@ -89,6 +95,9 @@ Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …
 
 - Svenska i all användartext och i kommentarer/README; engelska identifierare.
 - Inline-styles med tokens från `theme.js` (`T`, `RADIUS`, `FONT`) — ingen StyleSheet/styled-components.
+- **Typsnitt:** varje vikt i Roboto Flex är en egen familj (`FONT.regular/medium/semibold/bold/title/display`). Sätt **aldrig** `fontWeight` på text med dessa — Android byter då till systemfont. Tecknet `→` saknas i delmängden; använd ikonen `arrow`.
+- **Butiksfärg:** `tone(card.ink)` ger butikens palett (`primary`, `container`, `deco`, `light`, `onContainer`, `muted`). Hårdkoda inte butiksfärger i komponenter.
+- **Former:** använd `<Shape kind="cookie9" …>` (formerna i `shapes.js`) i stället för egna cirklar/rutor för dekor, avatarer och stämplar.
 - Animationer med core `Animated` + `useNativeDriver: true`; haptik via `expo-haptics` vid varje viktig interaktion.
 - All backendlogik i Postgres-RPC:er (`SECURITY DEFINER`); klienten är tunn och litar aldrig på lokalt state.
 - Fel sväljs ofta tyst (`catch {}`) och UI:t faller tillbaka till tomt läge — var försiktig med att anta att anrop lyckats.
@@ -118,7 +127,7 @@ Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …
 ## Kända begränsningar
 
 - **Ingen iOS-release publicerad ännu** — men koden är iOS-förberedd (se iOS-sektionen): SDK 54, plattformsgrenad NFC, ikon incheckad. Återstår: AASA-fil på tappass.se, EAS-bygge med Apple-credentials.
-- Typsnitt laddas i runtime från fonts.gstatic.com (`theme.js`) — första start utan nät ger systemfont.
+- Typsnitt (Roboto Flex, 6 statiska instanser) är inbäddade i `assets/fonts` och laddas via `expo-font` vid start. Splash och adaptiv ikon-bakgrund i `app.json` är fortfarande `#F7F4EE` (native — ändras först vid nästa bygge).
 - `device_id`-identiteten överlever inte ominstallation.
 - Ingen test-/lint-infrastruktur; verifiering sker manuellt på fysisk enhet med NFC (JS-nivå kan sanity-checkas med babel-transform).
 
@@ -148,7 +157,7 @@ iOS Core NFC skiljer sig fundamentalt från Android. Läsningen sker i `src/lib/
 4. **Entitlement:** `com.apple.developer.nfc.readersession.formats` läggs till av config-pluginet vid prebuild. Med EAS-hanterade credentials synkas capability "NFC Tag Reading" automatiskt till app-ID:t vid `eas build`/`eas credentials`. `includeNdefEntitlement: false` är satt i `app.json` — Apple avvisar `NDEF`-värdet för appar byggda med iOS 26 SDK (fel 90778 vid processning).
 5. ✅ **Info.plist:** `NFCReaderUsageDescription` + `ITSAppUsesNonExemptEncryption: false` finns i `app.json` (`ios.infoPlist`).
 6. ⏳ **Universal Links:** `associatedDomains` (`applinks:tappass.se`) finns, men kräver att tappass.se (Lovable) serverar `/.well-known/apple-app-site-association` med rätt Team-ID + bundle-ID. Åtgärdas i Lovable-projektet.
-7. ✅ **`AppLinkOnboarding.js` plattformsgrenad** — iOS får Universal Links/skanna-innehåll i stället för Androids "öppna som standard". Visas nu bara vid första start (AsyncStorage-flagga via `prefs.js`).
+7. ✅ **`AppLinkOnboarding.js` plattformsgrenad** — välkomstskärm följd av plattformssteg: iOS får Universal Links/skanna-innehåll i stället för Androids "öppna som standard". Visas bara vid första start (AsyncStorage-flagga via `prefs.js`) och kan öppnas igen via hjälpknappen i sidhuvudet.
 
 ### Byggkommandon
 

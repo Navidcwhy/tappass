@@ -1,73 +1,65 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Pressable, Modal, ScrollView, Animated, Easing, Linking, Platform } from "react-native";
+import { View, Text, Pressable, Modal, ScrollView, Animated, Linking, Platform, Dimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
-import { T, RADIUS, FONT } from "../lib/theme";
+import { T, FONT } from "../lib/theme";
 import { Icon } from "../lib/icons";
+import Shape from "./Shape";
 import BrandMark from "./BrandMark";
 
-// Android needs the user to opt the app in as the default handler for
-// tappass.se links so a tag tap auto-opens the app.
+const { width: W } = Dimensions.get("window");
+
+// Efter välkomstsidan: Android behöver att appen får öppna tappass.se-länkar
+// ("Öppna som standard") för att en tagg ska öppna appen direkt. iOS saknar den
+// inställningen — där förklaras Skanna-knappen.
 const ANDROID_STEPS = [
   {
-    label: "STEG 1 / 4",
-    title: "En sista sak innan magin funkar.",
-    body: "För att TapPass ska öppnas automatiskt när du tappar en NFC-tagg behöver du säga åt Android att appen får hantera länkar från tappass.se. Det tar 30 sekunder.",
-    cta: "Visa hur",
-    icon: "sparkles",
-  },
-  {
-    label: "STEG 2 / 4",
-    title: "Öppna Inställningar för TapPass.",
-    body: "Tryck på knappen nedan. Du tas direkt till TapPass app-inställningar. Leta efter raden \"Öppna som standard\".",
+    title: "Låt TapPass öppna stämplarna",
+    body: "När du tappar en stämpel öppnas en länk till tappass.se. Säg åt Android att TapPass får öppna de länkarna, så registreras stämpeln direkt. Tryck på knappen och leta upp raden ”Öppna som standard”.",
     cta: "Öppna app-inställningar",
-    icon: "arrowOut",
+    icon: "link",
+    shape: "sunny8",
     action: "open-settings",
   },
   {
-    label: "STEG 3 / 4",
-    title: "Lägg till tappass.se och www.tappass.se.",
-    body: "Inne i \"Öppna som standard\" trycker du på \"Lägg till länk\" (eller \"Add link\"). Bocka i både tappass.se och www.tappass.se. Klart.",
+    title: "Lägg till tappass.se",
+    body: "Inne i ”Öppna som standard” trycker du på ”Lägg till länk” och bockar i både tappass.se och www.tappass.se.",
     cta: "Jag har bockat i båda",
     icon: "check",
+    shape: "cookie12",
   },
   {
-    label: "STEG 4 / 4",
-    title: "Du är redo.",
-    body: "Tappa en TapPass-platta — appen öppnas och stämpeln registreras direkt. Funkar även när telefonen är låst.",
-    cta: "Kom igång",
-    icon: "scan",
+    title: "Du är redo",
+    body: "Tappa en TapPass-stämpel i kassan – appen öppnas och stämpeln registreras direkt.",
+    cta: "Börja samla",
+    icon: "nfc",
+    shape: "flower8",
   },
 ];
 
-// iOS has no "default handler" setting — Universal Links open the app
-// automatically once set up, and scanning is done from the Skanna-button.
 const IOS_STEPS = [
   {
-    label: "STEG 1 / 3",
-    title: "Så funkar TapPass.",
-    body: "Samla stämplar hos anslutna caféer. En full rad ger en belöning som personalen löser in med en kod.",
-    cta: "Visa hur",
-    icon: "sparkles",
-  },
-  {
-    label: "STEG 2 / 3",
-    title: "Tryck på Skanna och håll mot stämpeln.",
-    body: "Tryck på \"Skanna stämpel\" och håll toppen av iPhonen mot TapPass-plattan i kassan. iOS visar ett skanningsfönster — håll kvar tills det bekräftar.",
+    title: "Tryck på Skanna och håll mot stämpeln",
+    body: "Tryck på ”Skanna stämpel” och håll toppen av iPhonen mot TapPass-stämpeln i kassan. Håll kvar tills iOS bekräftar.",
     cta: "Uppfattat",
     icon: "scan",
+    shape: "sunny8",
   },
   {
-    label: "STEG 3 / 3",
-    title: "Du är redo.",
-    body: "Har butiken en länkad platta räcker det ofta att tappa telefonen mot den för att öppna appen direkt. Annars använder du Skanna-knappen.",
-    cta: "Kom igång",
-    icon: "check",
+    title: "Du är redo",
+    body: "Har butiken en länkad stämpel räcker det ofta att hålla telefonen mot den för att öppna appen direkt. Annars använder du Skanna-knappen.",
+    cta: "Börja samla",
+    icon: "nfc",
+    shape: "flower8",
   },
 ];
 
 const STEPS = Platform.OS === "ios" ? IOS_STEPS : ANDROID_STEPS;
+const TOTAL = STEPS.length + 1;   // + välkomstsidan
 
 export default function AppLinkOnboarding({ visible, onClose }) {
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -76,7 +68,7 @@ export default function AppLinkOnboarding({ visible, onClose }) {
   }, [visible]);
 
   // Körs även när modalen öppnas (inte bara vid stegbyte) — annars startar
-  // intoningen aldrig för steg 1 och innehållet fastnar på opacity 0.
+  // intoningen aldrig för första sidan och innehållet fastnar på opacity 0.
   useEffect(() => {
     if (!visible) return;
     slide.setValue(0);
@@ -84,54 +76,136 @@ export default function AppLinkOnboarding({ visible, onClose }) {
   }, [step, visible]);
 
   if (!visible) return null;
-  const s = STEPS[step];
+  const s = step > 0 ? STEPS[step - 1] : null;
+  const last = step === TOTAL - 1;
 
   const next = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (s.action === "open-settings") {
-      Linking.openSettings().catch(() => {});
-    }
-    if (step < STEPS.length - 1) setStep(step + 1);
+    if (s && s.action === "open-settings") Linking.openSettings().catch(() => {});
+    if (!last) setStep(step + 1);
     else { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); onClose(); }
   };
 
   return (
-    <Modal visible animationType="fade" transparent>
-      <View style={{ flex: 1, backgroundColor: T.ink }}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 30, paddingTop: 80, paddingBottom: 40, justifyContent: "space-between" }}>
-          {/* Progress dots */}
-          <View style={{ flexDirection: "row", gap: 6, marginBottom: 30 }}>
-            {STEPS.map((_, i) => (
-              <View key={i} style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: i <= step ? T.accent : "rgba(255,255,255,.15)" }} />
-            ))}
-          </View>
-
+    <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
           <Animated.View style={{ flex: 1, opacity: slide, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-            <Text style={{ fontFamily: FONT.uiBold, fontSize: 11, color: T.accent, letterSpacing: 2 }}>{s.label}</Text>
-
-            {/* Icon badge — loggan på första steget, lucide-ikoner på övriga */}
-            <View style={{ marginTop: 36, width: 84, height: 84, borderRadius: 42, backgroundColor: "rgba(184,214,53,.12)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(184,214,53,.3)" }}>
-              {step === 0
-                ? <BrandMark size={46} animated arcColor="#fff" dotColor={T.accent} />
-                : <Icon name={s.icon} size={38} color={T.accent} strokeWidth={1.6} />}
-            </View>
-
-            <Text style={{ fontFamily: FONT.display, fontSize: 36, color: "#fff", lineHeight: 40, marginTop: 28 }}>{s.title}</Text>
-            <Text style={{ fontFamily: FONT.ui, fontSize: 16, color: "rgba(255,255,255,.65)", marginTop: 18, lineHeight: 24 }}>{s.body}</Text>
+            {step === 0 ? <Welcome /> : <StepPage s={s} index={step} />}
           </Animated.View>
+        </ScrollView>
 
-          <Pressable onPress={next} style={({ pressed }) => ({ marginTop: 30, backgroundColor: T.accent, paddingVertical: 18, borderRadius: RADIUS.pill, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8, opacity: pressed ? 0.85 : 1 })}>
-            <Text style={{ fontFamily: FONT.uiBold, fontSize: 15, color: T.accentInk, letterSpacing: 0.3 }}>{s.cta}</Text>
-            <Icon name="chev" size={20} color={T.accentInk} strokeWidth={2.4} />
+        <View style={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+          <Pressable
+            onPress={next}
+            accessibilityRole="button"
+            style={({ pressed }) => ({ height: 56, borderRadius: 28, backgroundColor: T.primary, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}
+          >
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.onPrimary }}>{step === 0 ? "Kom igång" : s.cta}</Text>
           </Pressable>
-
-          {step < STEPS.length - 1 && (
-            <Pressable onPress={onClose} style={{ marginTop: 14, alignSelf: "center" }}>
-              <Text style={{ fontFamily: FONT.uiMed, fontSize: 13, color: "rgba(255,255,255,.4)" }}>Hoppa över</Text>
+          {!last && (
+            <Pressable onPress={onClose} accessibilityRole="button" style={{ marginTop: 4, height: 44, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: T.inkSoft }}>Hoppa över</Text>
             </Pressable>
           )}
-        </ScrollView>
+        </View>
       </View>
     </Modal>
+  );
+}
+
+function Welcome() {
+  return (
+    <View>
+      <WelcomeArt />
+      <View style={{ paddingHorizontal: 24, paddingTop: 8 }}>
+        <Text style={{ fontFamily: FONT.title, fontSize: 36, lineHeight: 43, color: T.ink }}>Stämpelkortet som bor i telefonen</Text>
+        <Text style={{ marginTop: 10, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft }}>
+          Tappa telefonen mot TapPass-stämpeln i kassan. Inget konto, ingen inloggning.
+        </Text>
+        <View style={{ marginTop: 20, flexDirection: "row", gap: 8 }}>
+          {["Tappa i kassan", "Samla stämplar", "Få belöningen"].map((label, i) => (
+            <View key={label} style={{ flex: 1, gap: 6 }}>
+              <Shape kind="cookie9" size={28} color={T.primary}>
+                <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: T.onPrimary }}>{i + 1}</Text>
+              </Shape>
+              <Text style={{ fontFamily: FONT.semibold, fontSize: 13, lineHeight: 17, color: T.ink }}>{label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function StepPage({ s, index }) {
+  return (
+    <View style={{ paddingHorizontal: 24, paddingTop: 24 }}>
+      <View style={{ flexDirection: "row", gap: 6 }}>
+        {Array.from({ length: TOTAL }).map((_, i) => (
+          <View key={i} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= index ? T.primary : T.container }} />
+        ))}
+      </View>
+      <Shape kind={s.shape} size={140} color={T.primaryContainer} style={{ marginTop: 40 }}>
+        <Icon name={s.icon} size={52} color={T.onPrimaryContainer} strokeWidth={1.8} />
+      </Shape>
+      <Text style={{ marginTop: 28, fontFamily: FONT.bold, fontSize: 12, letterSpacing: 0.96, color: T.primary }}>STEG {index + 1} AV {TOTAL}</Text>
+      <Text style={{ marginTop: 6, fontFamily: FONT.title, fontSize: 32, lineHeight: 39, color: T.ink }}>{s.title}</Text>
+      <Text style={{ marginTop: 12, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft }}>{s.body}</Text>
+    </View>
+  );
+}
+
+// Illustration: telefon som tappas mot TapPass-stämpeln, med stämplar som flyger ut.
+// Ritad i en 390×330-ruta och skalad till skärmbredden.
+function WelcomeArt() {
+  const s = Math.min(1, W / 390);
+  const done = (size, color) => (
+    <Shape kind="cookie9" size={size} color={color}>
+      <Icon name="check" size={Math.round(size * 0.47)} color="#FFFFFF" strokeWidth={3.5} />
+    </Shape>
+  );
+  const mini = (color, n) => Array.from({ length: 6 }).map((_, i) => (
+    <Shape key={i} kind="cookie9" size={14} color={i < n ? color[0] : color[1]} />
+  ));
+
+  return (
+    <View accessible={false} importantForAccessibility="no-hide-descendants" style={{ width: 390 * s, height: 330 * s, alignSelf: "center" }}>
+      <View style={{ position: "absolute", width: 390, height: 330, left: -(390 * (1 - s)) / 2, top: -(330 * (1 - s)) / 2, transform: [{ scale: s }] }}>
+        <Shape kind="flower8" size={280} color={T.primaryContainer} style={{ position: "absolute", left: 55, top: 34 }} />
+        <Shape kind="sunny8" size={96} color="#D3E8EC" style={{ position: "absolute", left: 278, top: 20 }} />
+        <Shape kind="clover4" size={76} color={T.tertiaryContainer} style={{ position: "absolute", left: 20, top: 214 }} />
+
+        <View style={{ position: "absolute", left: 118, top: 46, width: 132, height: 236, padding: 6, borderRadius: 28, backgroundColor: T.ink, transform: [{ rotate: "-8deg" }], shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 12 }, elevation: 8 }}>
+          <View style={{ flex: 1, paddingTop: 16, paddingHorizontal: 10, borderRadius: 22, backgroundColor: T.bg, gap: 8 }}>
+            <View style={{ width: 58, height: 9, borderRadius: 5, backgroundColor: T.ink }} />
+            <View style={{ marginTop: 6, padding: 10, borderRadius: 14, backgroundColor: "#DCE8B4", gap: 8 }}>
+              <View style={{ width: 64, height: 7, borderRadius: 4, backgroundColor: "#56642B" }} />
+              <View style={{ flexDirection: "row", gap: 4 }}>{mini(["#56642B", "#CBDB98"], 4)}</View>
+              <View style={{ height: 18, borderRadius: 9, backgroundColor: "#56642B" }} />
+            </View>
+            <View style={{ padding: 10, borderRadius: 14, backgroundColor: "#D3E8EC", gap: 8 }}>
+              <View style={{ width: 44, height: 7, borderRadius: 4, backgroundColor: "#1B6371" }} />
+              <View style={{ flexDirection: "row", gap: 4 }}>{mini(["#1B6371", "#B3D3D9"], 3)}</View>
+            </View>
+          </View>
+        </View>
+
+        <Svg width={390} height={330} viewBox="0 0 390 330" style={{ position: "absolute", left: 0, top: 0 }}>
+          <Path d="M264.4 228.3A10 10 0 0 1 264.4 243.7" stroke={T.primary} strokeWidth={3} strokeLinecap="round" fill="none" />
+          <Path d="M269.6 222.2A18 18 0 0 1 269.6 249.8" stroke={T.primary} strokeWidth={3} strokeLinecap="round" fill="none" />
+          <Path d="M274.7 216.1A26 26 0 0 1 274.7 255.9" stroke={T.primary} strokeWidth={3} strokeLinecap="round" fill="none" />
+        </Svg>
+
+        <View style={{ position: "absolute", left: 290, top: 196, width: 80, height: 80, borderRadius: 40, backgroundColor: T.ink, borderWidth: 4, borderColor: T.lime, alignItems: "center", justifyContent: "center", gap: 2, shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 12, shadowOffset: { width: 0, height: 8 }, elevation: 8 }}>
+          <BrandMark size={26} arcColor={T.lime} dotColor={T.lime} />
+          <Text style={{ fontFamily: FONT.bold, fontSize: 11, color: T.lime }}>TapPass</Text>
+        </View>
+
+        <View style={{ position: "absolute", left: 52, top: 110 }}>{done(34, "#56642B")}</View>
+        <View style={{ position: "absolute", left: 300, top: 130 }}>{done(28, "#1B6371")}</View>
+        <Shape kind="cookie9" size={22} color={T.primary} style={{ position: "absolute", left: 96, top: 34 }} />
+      </View>
+    </View>
   );
 }

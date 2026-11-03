@@ -16,7 +16,7 @@ function ArcLayer({ d, color, size, strokeWidth }) {
   );
 }
 
-export default function BrandMark({ size = 28, animated = false, arcColor = T.ink, dotColor = T.accent, strokeWidth = 10 }) {
+export default function BrandMark({ size = 28, animated = false, arcColor = T.ink, dotColor = T.lime, strokeWidth = 10 }) {
   const inner = useRef(new Animated.Value(1)).current;
   const outer = useRef(new Animated.Value(1)).current;
 
