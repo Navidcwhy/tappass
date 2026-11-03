@@ -1,9 +1,8 @@
 -- ═══════════════════════════════════════════════════════════════════════
 -- TapPass v4 — säkerhetsfix (2026-11-03)
--- STATUS 2026-11-03: EJ KÖRD ÄN. Kör HELA filen en gång i Supabase SQL Editor
---   (Supabase-MCP:ns bekräftelseruta kunde inte visas från AI-sessionen).
---   Provkörd mot en kopia av live-schemat med funktionsdefinitionerna hämtade
---   från produktion 2026-11-03. Idempotent: tål att köras flera gånger.
+-- STATUS: KÖRD I PRODUKTION 2026-11-03 (SQL Editor) och verifierad samma dag
+--   (behörigheter, policies, search_path, index, funktionsinnehåll, Security
+--   Advisor). Provkörd i förväg mot en kopia av live-schemat. Idempotent.
 --
 -- Bygger på det som faktiskt körs live: supabase_schema.sql + v2.
 -- v3 är INTE körd (se varningen överst i supabase_migration_v3.sql).
