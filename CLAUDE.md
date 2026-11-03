@@ -34,8 +34,9 @@ app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin
 eas.json                     # EAS-byggprofiler (development/preview/production)
 supabase_schema.sql          # v1-schema: cafes, tags, users, stamps, redemptions + tap_token m.fl.
 supabase_migration_v2.sql    # v2: cafe_pins (bcrypt-PIN), redeem-koder, merchant_*-RPC:er
-supabase_migration_v3.sql    # v3: cooldown i tap_token, PIN-lockout … — EJ KÖRD, se varningen i filen
+supabase_migration_v3.sql    # v3: ERSATT av v4 + v5 — kör aldrig
 supabase_migration_v4_security.sql # v4: säkerhetsfix — kod kräver fullt kort, redeem_reward stängd, taggar ej listbara
+supabase_migration_v5_cooldown_login.sql # v5: väntetid per butik, inloggningsnamn + sessioner + PIN-spärr, admin_issue_pin
 src/
   lib/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
@@ -80,7 +81,7 @@ npm start
 
 Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar (endast i dev-builds, `__DEV__`) skickar samma `tap_token`-anrop som en riktig tagg. De renderas aldrig i produktion.
 
-Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `cafe_pins`) — inte i koden. Se README-v5.md.
+Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …`, sedan `select public.admin_issue_pin('<slug>');` som skapar tagg, inloggning och slumpad PIN. Se README-v5.md.
 
 ## Kodkonventioner
 
@@ -97,8 +98,9 @@ Nya caféer/taggar läggs in direkt i Supabase (insert i `cafes` + `tags` + `caf
 - Butiks-PIN:er får ALDRIG committas (inte i SQL, README eller kommentarer). Sätt dem manuellt i SQL Editor.
 - **Produktion är facit, inte repots SQL.** Live-databasen har ändrats manuellt och skiljer sig från v1/v2-filerna (t.ex. har `cafe_pins` RLS i produktion men inte i v2-filen). Hämta `pg_get_functiondef` innan en funktion skrivs om.
 - **v4 (`supabase_migration_v4_security.sql`):** `save_reward` kräver fullt kort; `redeem_reward` är stängd för klientroller — bara personalen löser in (`merchant_redeem_by_code`); `tags` är inte läsbar för klienter (publik butiksinfo per token via `tag_public_info`, används av tappass.se/t/…); `search_path` låst på alla RPC:er. Appens anrop till `redeem_reward` i `onRedeemed` får behörighetsfel som ignoreras — bör tas bort i appen.
-- **Ingen cooldown i produktion:** v3 är inte körd, så samma enhet kan stämpla obegränsat, och token är gissningsbara (`<slug>-01`). Appen hanterar redan `error: "cooldown"` för när v3:s cooldown slås på.
-- **PIN-inloggningen** (`merchant_*`) saknar spärr mot gissning på serversidan; tappass.se/m:s 30-sekundersspärr ligger i webbläsaren och går att kringgå.
+- **Väntetid per butik (v5):** `cafes.stamp_cooldown_seconds` (10 s–24 h, standard 60 s) som butiken ändrar i tappass.se/m. `tap_token` svarar `error: "cooldown"` + `retry_after_seconds`/`retry_after_minutes`, och appen visar det som info. Appen ignorerar dessutom samma token inom 5 s (dubbelläsning). Token är statiska och gissningsbara (`<slug>-01`): väntetiden bromsar fusk men stoppar inte den som anropar API:t hemifrån. Långsiktigt krävs dynamiska taggar (t.ex. NTAG 424 DNA).
+- **Butiksinloggning (v5):** inloggningsnamn (`cafe_pins.login_name`, standard = slug, butiken kan byta) + 6-siffrig PIN ger en sessionsnyckel (30 dagar, hashad i `merchant_sessions`). Panelen sparar nyckeln, aldrig PIN:en. 10 fel PIN låser ny inloggning i 15 min; inloggade sessioner fungerar under spärren. PIN-byte loggar ut övriga enheter.
+- **Ny butik / glömd PIN:** `insert into cafes …` och sedan `select public.admin_issue_pin('<slug>');` i SQL Editor. Ger inloggningsnamn, slumpad PIN (visas en gång) och tagg. Kör den **aldrig** via AI/MCP — då hamnar PIN:en i chattloggar.
 - **Supabase free plan** pausar projektet efter 7 dagar utan trafik → app och butikspanel slutar svara tills det återstartas.
 - `.env` är gitignorad men används inte i dag — Supabase-URL/nyckel är hårdkodade.
 

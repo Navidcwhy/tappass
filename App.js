@@ -157,10 +157,13 @@ export default function App() {
           return;
         }
         case "cooldown": {
-          // Backend v3: already stamped here recently — show state, don't scold.
+          // Backend v5: butikens väntetid (10 s–24 h) — visa läget, skäll inte.
           const cafe = normalizeCafe(result.cafe);
-          const mins = Number(result.retry_after_minutes) || 0;
-          const when = mins >= 60 ? "om " + Math.ceil(mins / 60) + " tim" : mins > 0 ? "om " + mins + " min" : "strax";
+          const secs = Number(result.retry_after_seconds) || 0;
+          const mins = Number(result.retry_after_minutes) || Math.ceil(secs / 60);
+          const when = secs > 0 && secs < 60 ? "om " + secs + " sek"
+            : mins >= 60 ? "om " + Math.ceil(mins / 60) + " tim"
+            : mins > 0 ? "om " + mins + " min" : "strax";
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           setToast({
             type: "info",
@@ -200,13 +203,25 @@ export default function App() {
     }
   }, []);
 
+  // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
+  // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
+  // servern spärrar dessutom med butikens väntetid. Gäller inte dev-simulering.
+  const lastTagRef = useRef({ token: null, at: 0 });
+  const sendTagTap = useCallback((token) => {
+    const key = String(token).toLowerCase();
+    const now = Date.now();
+    if (lastTagRef.current.token === key && now - lastTagRef.current.at < 5000) return;
+    lastTagRef.current = { token: key, at: now };
+    return sendTap(token);
+  }, [sendTap]);
+
   // Tag is tapped via NFC deep-link (https://tappass.se/t/<token>) or local simulate
   const handleUrl = useCallback((url) => {
     const token = tokenFromUrl(url);
     if (!token) return;
-    sendTap(token);
+    sendTagTap(token);
     setTab("home");
-  }, [sendTap]);
+  }, [sendTagTap]);
 
   useEffect(() => {
     Linking.getInitialURL().then((url) => { if (url) handleUrl(url); });
@@ -266,7 +281,7 @@ export default function App() {
               progressCards={progressCards}
               totalStamps={totalStamps}
               onSimulate={simulateStamp}
-              onSendTap={sendTap}
+              onSendTap={sendTagTap}
               onOpenReward={setRewardId}
               hasCards={cards.length > 0}
               cafes={allCafes}

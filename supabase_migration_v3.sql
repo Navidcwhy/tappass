@@ -2,13 +2,10 @@
 -- TapPass v3 — anti-fusk och härdning. Kör HELA filen i Supabase SQL Editor.
 -- (Bygger ovanpå supabase_schema.sql + supabase_migration_v2.sql.)
 --
--- ⚠️ STATUS 2026-11-03: EJ KÖRD — kör INTE filen som den är.
---    Kör supabase_migration_v4_security.sql först. Innan v3 körs:
---    a) Gör om PIN-spärren i §4: 5 fel per 15 min kan missbrukas för att
---       låsa ute en butik (vem som helst kan skicka 5 fel PIN).
---    b) Lägg till `set search_path = public, extensions` på varje funktion
---       (v4 låste den; create or replace här skulle annars ta bort det).
---    c) tag_public_info och borttagen tags_read finns redan via v4.
+-- ⛔ ERSATT — KÖR ALDRIG DENNA FIL (status 2026-11-03). Aldrig körd i produktion.
+--    Innehållet finns nu i v4 (taggar, tag_public_info) och v5 (väntetid per
+--    butik, PIN-spärr med sessioner). Körd efter v5 skulle den återinföra de
+--    gamla PIN-funktionerna och skriva över tap_token. Sparad som historik.
 --
 -- ORDNING VID UTRULLNING:
 --   1. Skicka app-patchen via `eas update` FÖRST (den hanterar både gamla
