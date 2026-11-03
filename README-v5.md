@@ -5,7 +5,7 @@ PIN-baserad inlösen, merchant-dashboard på tappass.se/m.
 ## Butikens PIN
 
 PIN-koder lagras bara som bcrypt-hash i `cafe_pins` och får ALDRIG skrivas i git, README eller chattloggar.
-Sätt/byt PIN manuellt i Supabase SQL Editor (se mall i `supabase_migration_v2.sql` §13) och skicka koden till butiken via SMS.
+**Från v5:** ny butik eller glömd PIN → kör `select public.admin_issue_pin('<slug>');` i Supabase SQL Editor. Den ger inloggningsnamn, en slumpad 6-siffrig PIN (visas en gång) och skapar taggen `<slug>-01` om den saknas. Skicka uppgifterna till butiken via SMS. Kör den aldrig via en AI-assistent — då hamnar PIN:en i chattloggen. Butiken byter själv inloggningsnamn, PIN och väntetid under Inställningar på tappass.se/m.
 
 ## Gör i exakt denna ordning
 
@@ -100,9 +100,9 @@ Vi felsöker.
 ## Vad backenden kan göra nu (utöver appen)
 
 Du kan direkt i SQL Editor:
-- Lägga till ett nytt café (insert into cafes + insert into tags + insert into cafe_pins)
+- Lägga till ett nytt café: `insert into cafes …`, sedan `select public.admin_issue_pin('<slug>');` (skapar tagg + inloggning + slumpad PIN)
 - Se all aktivitet (select från stamps, redemptions)
-- Ändra Miyabis pin: `update cafe_pins set pin_hash = crypt('ny_pin', gen_salt('bf')) where cafe_id = (select id from cafes where slug = 'miyabi');`
+- Ny PIN till en butik (t.ex. glömd): `select public.admin_issue_pin('miyabi');` — loggar ut butikens alla enheter och nollställer PIN-spärren
 
 ## Nästa steg efter detta funkar
 
