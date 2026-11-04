@@ -91,6 +91,8 @@ Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar (endast i dev-builds, `_
 
 Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …`, sedan `select public.admin_issue_pin('<slug>');` som skapar tagg, inloggning och slumpad PIN. Se README-v5.md.
 
+**Testbygge från en Claude-session (molnet):** Expo-projektet saknar GitHub-koppling, så `build_run` i Expo-kopplingen ger "No repository found", och GitHub Actions-API:t är blockerat från sessionen. Fungerande väg: skapa en EAS-sandlåda (`sandbox_create`, Linux) → `git clone` repot (publikt) → `npm ci` → `npx eas-cli@latest build -p android --profile preview --non-interactive --no-wait` (sandlådan är inloggad som `tappass-org`) → stoppa sandlådan. Fungerar bara när Expos kö är kort: sandlådans tidsgräns räknas från skapandet, och vid ~45 min kö (kvällar svensk tid) stängs den direkt när den startar. Preview-bygget blir en APK på kanalen `preview` (första 2026-11-04) och kan inte installeras ovanpå Play-versionen (annan signering).
+
 ## Kodkonventioner
 
 - Svenska i all användartext och i kommentarer/README; engelska identifierare.
@@ -123,6 +125,18 @@ Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …
 2. **Kör via Supabase-kopplingen** (`apply_migration`) så att Navid kan godkänna i bekräftelserutan — det är förstahandsvalet.
 3. **Om bekräftelsen avbryts automatiskt:** Navid kör filen i Supabase SQL Editor på dator. På mobil klipps långa inklistringar (v5 klipptes efter ~2,5 kB) — använd då en kort snutt som hämtar filen från GitHub låst till commit-SHA + md5 och kör den med `execute` (`http`-tillägget skapas och tas bort i samma körning). Mall: PR #11 / körningen 2026-11-03.
 4. **Verifiera alltid efteråt** med läsfrågor (behörigheter, funktionsinnehåll, data orörd) och `get_advisors`.
+
+## Planerat: Dagens hjul (beslutat 2026-11-04, ej byggt)
+
+Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens hjul" (`K-Hjul-*`). Officiella regler: användarvillkoren på tappass.se (§ 5–7), butikernas åtagande i köpvillkoren (§ 5), datahantering i integritetspolicyn — alla uppdaterade 2026-11-04.
+
+- **Servern avgör allt:** utfall (10 fält, 4 vinster = 40 %), ett snurr per enhet och dygn från 00.00 svensk tid, nästa snurrtid. Telefonens klocka används aldrig; hjulanimationen visar bara serverns resultat.
+- **Stad:** väljs före första snurret, sparas bara i AsyncStorage och skickas med vid snurr. Lagras inte på servern (utlovat i integritetspolicyn). Ingen platsbehörighet.
+- **Vinst:** kunden väljer 1 av 3 slumpade anslutna ställen i staden (gärna minst ett där kunden saknar stämplar). Ställen där kunden redan har en aktiv bonus visas inte.
+- **Dubbelstämpel:** nästa stämpling hos stället ger 2 (vanlig väntetid gäller). Gäller vinstdagen + 2 dagar t.o.m. 23.59. Överskott följer med till nästa kort — inlösen ska nollställa kortet till överskottet, inte till 0 (ändring i `tap_token` + `merchant_redeem_by_code`; hämta `pg_get_functiondef` först).
+- **Butikspanelen** ska redovisa kampanj- och bonusstämplar (utlovat i köpvillkoren).
+- **Appen** måste visa reglerna (Apple 5.3: Folde.AI AB är sponsor; Apple och Google är inte inblandade).
+- **Fusk:** `device_id` utan konto gör att snurr kan "farmas" med nya id, men bonusen kräver ändå en riktig stämpling på plats.
 
 ## Kända begränsningar
 
