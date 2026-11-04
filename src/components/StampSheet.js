@@ -7,8 +7,9 @@ import StampRow from "./StampRow";
 
 const lowerFirst = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : "");
 
-// Arket som kommer upp efter en lyckad tap: "+1", var kortet står och
-// den nya stämpeln som studsar in. Stängs av App efter några sekunder.
+// Arket som kommer upp efter en lyckad tap: "+1" (eller "+2" med dubbelstämpel
+// från Dagens hjul), var kortet står och den nya stämpeln som studsar in.
+// Stängs av App efter några sekunder.
 export default function StampSheet({ card, onClose }) {
   const insets = useSafeAreaInsets();
   const rise = useRef(new Animated.Value(0)).current;
@@ -28,6 +29,7 @@ export default function StampSheet({ card, onClose }) {
   const stamps = Math.max(0, Math.min(card.stamps || 0, needed));
   const left = needed - stamps;
   const leftText = left === 1 ? "en kvar" : left + " kvar";
+  const added = card.added === 2 ? 2 : 1;   // 2 = dubbelstämpel från Dagens hjul
 
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
@@ -46,12 +48,14 @@ export default function StampSheet({ card, onClose }) {
             <Shape kind="cookie9" size={16} color={t.primary} style={{ position: "absolute", right: 10, bottom: 6 }} />
             <Animated.View style={{ position: "absolute", left: 19, top: 9, transform: [{ scale: pop }, { rotate: pop.interpolate({ inputRange: [0, 1], outputRange: ["-30deg", "0deg"] }) }] }}>
               <Shape kind="burst12" size={132} color={t.primary}>
-                <Text style={{ fontFamily: FONT.display, fontSize: 46, color: "#FFFFFF" }}>+1</Text>
+                <Text style={{ fontFamily: FONT.display, fontSize: 46, color: "#FFFFFF" }}>+{added}</Text>
               </Shape>
             </Animated.View>
           </View>
 
-          <Text style={{ marginTop: 14, fontFamily: FONT.title, fontSize: 24, lineHeight: 32, color: T.ink, textAlign: "center" }}>Stämpel hos {card.name}</Text>
+          <Text style={{ marginTop: 14, fontFamily: FONT.title, fontSize: 24, lineHeight: 32, color: T.ink, textAlign: "center" }}>
+            {added === 2 ? "Dubbelstämpel hos " : "Stämpel hos "}{card.name}
+          </Text>
           <Text style={{ marginTop: 4, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }}>
             {stamps} av {needed} – {leftText} till {lowerFirst(card.rewardShort || card.reward)}.
           </Text>

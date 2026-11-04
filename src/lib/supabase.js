@@ -68,6 +68,40 @@ export async function getCurrentSavedCode(cafeSlug) {
   }
 }
 
+// ── Dagens hjul (v6) ─────────────────────────────────────────────────────
+// Alla tre returnerar serverns jsonb. Nät-/RPC-fel blir { ok: false, error: "network" }
+// så att UI:t aldrig tolkar ett nätfel som "redan snurrat" eller "ingen vinst".
+async function wheelRpc(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// { ok, can_spin, next_spin_at, today, prize, bonuses, cities }
+export async function wheelStatus() {
+  const device_id = await getDeviceId();
+  return wheelRpc("wheel_status", { p_device_id: device_id });
+}
+
+// Staden skickas med men sparas inte på servern.
+// { ok, spin_id, won, segment, next_spin_at, claim_until, offers } eller
+// { ok: false, error: "already_spun" | "no_places" | "no_city" | "network" }
+export async function spinWheel(city) {
+  const device_id = await getDeviceId();
+  return wheelRpc("spin_wheel", { p_device_id: device_id, p_city: city });
+}
+
+// { ok, cafe, expires_at, stamps } eller
+// { ok: false, error: "not_offered" | "already_claimed" | "expired" | "bonus_exists" | "network" }
+export async function claimWheelPrize(spinId, cafeSlug) {
+  const device_id = await getDeviceId();
+  return wheelRpc("claim_wheel_prize", { p_device_id: device_id, p_spin_id: spinId, p_cafe_slug: cafeSlug });
+}
+
 export async function loadWallet() {
   const device_id = await getDeviceId();
   const { data, error } = await supabase.rpc("load_wallet", { p_device_id: device_id });

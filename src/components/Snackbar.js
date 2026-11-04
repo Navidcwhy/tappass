@@ -8,6 +8,7 @@ import { Icon } from "../lib/icons";
 //   pending-block — belöning väntar → stämpling pausad (butikens färg + "Visa kod")
 //   network       — ingen anslutning (mörk snackbar + "Försök igen")
 //   unknown       — okänd stämpel (felruta)
+//   wheel-miss    — Dagens hjul: ingen vinst + tid till nästa snurr (mörk)
 export default function Snackbar({ toast, bottom = 100, onAction }) {
   const anim = useRef(new Animated.Value(0)).current;
   const [shown, setShown] = useState(toast);
@@ -74,6 +75,16 @@ function Body({ toast, onAction }) {
     );
   }
 
+  // Dagens hjul: ingen vinst (mörk, försvinner efter 3 s)
+  if (toast.type === "wheel-miss") {
+    return (
+      <View style={{ ...SHADOW, borderRadius: 12, backgroundColor: T.inverseSurface, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Icon name="timer" size={22} color={T.inversePrimary} />
+        <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inverseOnSurface }}>{toast.text}</Text>
+      </View>
+    );
+  }
+
   if (toast.type === "unknown") {
     return (
       <View style={{ ...SHADOW, borderRadius: 16, backgroundColor: T.errorContainer, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
@@ -86,10 +97,10 @@ function Body({ toast, onAction }) {
     );
   }
 
-  // info (väntetid)
+  // info (väntetid, hjulets besked)
   return (
     <View style={{ ...SHADOW, borderRadius: 16, backgroundColor: T.secondaryContainer, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-      <Icon name="timer" size={22} color={T.onSecondaryContainer} />
+      <Icon name={toast.icon || "timer"} size={22} color={T.onSecondaryContainer} />
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: FONT.bold, fontSize: 14, lineHeight: 19, color: T.onSecondaryContainer }}>{toast.title}</Text>
         {!!toast.subtitle && <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>{toast.subtitle}</Text>}

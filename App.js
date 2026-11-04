@@ -10,9 +10,10 @@ import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
 import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
-import { tapToken, saveReward, loadWallet, loadCafes } from "./src/lib/supabase";
+import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus } from "./src/lib/supabase";
 import { hasOnboarded, markOnboarded } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
+import { expiryText } from "./src/lib/wheel";
 import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
@@ -20,6 +21,7 @@ import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
 import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
 import Shape from "./src/components/Shape";
+import DailyWheel from "./src/components/DailyWheel";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -43,12 +45,13 @@ function normalizeCafe(c) {
   };
 }
 
-function normalizeCard({ cafe, stamps, pending }) {
+function normalizeCard({ cafe, stamps, pending, bonus_expires_at }) {
   return {
     ...normalizeCafe(cafe),
     stamps,
     times: [],                // we don't render exact times anymore — saved server-side
     pendingReward: !!pending,
+    bonusExpiresAt: bonus_expires_at || null,   // Dagens hjul: aktiv dubbelstämpel
   };
 }
 
@@ -88,6 +91,9 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toast, setToast] = useState(null);
   const [stampCard, setStampCard] = useState(null);  // "Ny stämpel"-arket
+  const [celebrationCarry, setCelebrationCarry] = useState(0);  // överskott som följer med till nästa kort
+  const [wheel, setWheel] = useState(null);          // Dagens hjul: serverns läge (null = inte hämtat)
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [bottomH, setBottomH] = useState(96);
   const walletRef = useRef(wallet);
@@ -128,13 +134,24 @@ export default function App() {
       hasOnboarded().then((done) => { if (!done) setTimeout(() => setShowOnboarding(true), 1500); });
 
       // Background refresh. null = request failed -> keep cached state.
-      const [cafes, rows] = await Promise.all([loadCafes(), loadWallet()]);
+      const [cafes, rows, wheelNow] = await Promise.all([loadCafes(), loadWallet(), wheelStatus()]);
       syncedRef.current = true;
       if (cafes) setAllCafes(cafes.map(normalizeCafe));
       if (rows) setWallet(walletFromRows(rows));
+      setWheel(wheelNow);
       setSynced(true);
     })();
   }, []);
+
+  // Dagens hjul: hämta läget igen. Ett nätfel ersätter inte ett känt läge.
+  const loadWheel = useCallback(async () => {
+    const s = await wheelStatus();
+    setWheel((prev) => (s && s.ok ? s : prev && prev.ok ? prev : s));
+    return s;
+  }, []);
+
+  // Reglerna hör till hjulfliken — stäng dem när man byter flik.
+  useEffect(() => { if (tab !== "wheel") setRulesOpen(false); }, [tab]);
 
   // Persist the latest known state for the next cold start.
   useEffect(() => {
@@ -217,17 +234,20 @@ export default function App() {
     }
 
     lastFailedTokenRef.current = null;
+    // En lyckad stämpel förbrukar alltid en aktiv dubbelstämpel hos butiken.
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
     setWallet((prev) => ({ ...prev, [card.slug]: card }));
+    if (result.bonus_applied) loadWheel();
 
     if (result.complete) {
+      setCelebrationCarry(Number(result.carry_over) || 0);
       setTimeout(() => setCelebrationId(card.slug), 700);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      showStamp(card);
+      Haptics.impactAsync(result.bonus_applied ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Medium);
+      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1 });
     }
-  }, [showToast, showStamp]);
+  }, [showToast, showStamp, loadWheel]);
 
   // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
   // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
@@ -290,6 +310,23 @@ export default function App() {
     if (a.type === "retry" && lastFailedTokenRef.current) sendTap(lastFailedTokenRef.current);
   };
 
+  // Dagens hjul: vinsten är hämtad → kortet med bonusen syns under Kort.
+  const onWheelClaimed = async (cafe, expiresAt) => {
+    await refreshWallet();
+    setTab("home");
+    if (cafe) {
+      showToast({
+        type: "info",
+        icon: "gift",
+        title: "Dubbelstämpel hos " + cafe.name,
+        subtitle: "Nästa stämpel där ger 2 · " + expiryText(expiresAt),
+      }, 4500);
+    }
+  };
+
+  const titles = { home: "Dina kort", wheel: "Dagens hjul", discover: "Ställen" };
+  const wheelReady = !!(wheel && wheel.ok && (wheel.can_spin || wheel.prize) && (wheel.cities || []).length > 0);
+
   // Dev-only: the simulate row sends the same tap_token call as a physical tag.
   // Never shipped to production (__DEV__ is false in EAS production/preview builds).
   const simulateStamp = __DEV__ ? (cafe) => sendTap(cafe.slug + "-01") : null;
@@ -301,13 +338,18 @@ export default function App() {
     <SafeAreaProvider key={fontEpoch}>
       <StatusBar barStyle="dark-content" backgroundColor={T.bg} />
       <SafeAreaView edges={["top"]} style={{ flex: 1, backgroundColor: T.bg }} onLayout={onLayoutReady}>
-        <Header title={tab === "home" ? "Dina kort" : "Ställen"} onHelp={() => setShowOnboarding(true)} loading={loadingAction} />
+        <Header
+          title={titles[tab]}
+          onHelp={() => (tab === "wheel" ? setRulesOpen(true) : setShowOnboarding(true))}
+          helpLabel={tab === "wheel" ? "Regler för Dagens hjul" : "Hjälp och introduktion"}
+          loading={loadingAction}
+        />
 
         <ScrollView
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={refreshWallet} tintColor={T.inkMute} colors={[T.primary]} />}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={tab === "wheel" ? loadWheel : refreshWallet} tintColor={T.inkMute} colors={[T.primary]} />}
         >
           {tab === "home" ? (
             <HomeTab
@@ -321,6 +363,16 @@ export default function App() {
               onSimulate={simulateStamp}
               cafes={allCafes}
             />
+          ) : tab === "wheel" ? (
+            <DailyWheel
+              status={wheel}
+              onReload={loadWheel}
+              onToast={showToast}
+              onClaimed={onWheelClaimed}
+              rulesVisible={rulesOpen}
+              onOpenRules={() => setRulesOpen(true)}
+              onCloseRules={() => setRulesOpen(false)}
+            />
           ) : (
             <PlacesTab cafes={allCafes} wallet={wallet} />
           )}
@@ -328,28 +380,28 @@ export default function App() {
 
         <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}>
           {tab === "home" && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
-          <BottomNav tab={tab} setTab={setTab} />
+          <BottomNav tab={tab} setTab={setTab} wheelReady={wheelReady} />
         </View>
 
         <Snackbar toast={toast} bottom={bottomH + 12} onAction={onSnackAction} />
 
         <StampSheet card={stampCard} onClose={closeStamp} />
         <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => setRewardId(null)} onRedeemed={onRedeemed} />
-        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => setCelebrationId(null)} />
+        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => setCelebrationId(null)} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-function Header({ title, onHelp, loading }) {
+function Header({ title, onHelp, helpLabel, loading }) {
   return (
     <View style={{ paddingLeft: 20, paddingRight: 16, paddingTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
         <Text accessibilityRole="header" style={{ fontFamily: FONT.title, fontSize: 34, lineHeight: 40, color: T.ink }}>{title}</Text>
         {loading && <ActivityIndicator size="small" color={T.inkMute} />}
       </View>
-      <Pressable accessibilityLabel="Hjälp och introduktion" onPress={onHelp} style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 24, backgroundColor: T.container, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.8 : 1 })}>
+      <Pressable accessibilityLabel={helpLabel || "Hjälp och introduktion"} onPress={onHelp} style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 24, backgroundColor: T.container, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.8 : 1 })}>
         <Icon name="help" size={22} color={T.ink} />
       </Pressable>
     </View>
@@ -532,9 +584,18 @@ function PlaceCard({ cafe, card }) {
           </Text>
         </View>
       </View>
-      {!!progress && (
-        <View style={{ alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: t.primary }}>
-          <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: "#FFFFFF" }}>{progress}</Text>
+      {(!!progress || !!card?.bonusExpiresAt) && (
+        <View style={{ alignSelf: "flex-start", alignItems: "flex-end", gap: 6 }}>
+          {!!progress && (
+            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: t.primary }}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: "#FFFFFF" }}>{progress}</Text>
+            </View>
+          )}
+          {!!card?.bonusExpiresAt && (
+            <View accessibilityLabel="Dubbelstämpel aktiv" style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: T.lime }}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: T.onPrimaryContainer }}>×2</Text>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -710,20 +771,21 @@ function IosScanner({ nfc, onSendTap }) {
   );
 }
 
-function BottomNav({ tab, setTab }) {
+function BottomNav({ tab, setTab, wheelReady }) {
   const insets = useSafeAreaInsets();
-  const Item = ({ k, label, icon }) => {
+  const Item = ({ k, label, icon, dot }) => {
     const on = tab === k;
     return (
       <Pressable
         onPress={() => { if (!on) Haptics.selectionAsync(); setTab(k); }}
         accessibilityRole="tab"
         accessibilityState={{ selected: on }}
-        accessibilityLabel={label}
+        accessibilityLabel={dot ? label + ", nytt snurr väntar" : label}
         style={{ flex: 1, alignItems: "center", gap: 4 }}
       >
         <View style={{ width: 64, height: 32, borderRadius: 16, backgroundColor: on ? T.primaryContainer : "transparent", alignItems: "center", justifyContent: "center" }}>
           <Icon name={icon} size={22} color={on ? T.ink : T.inkSoft} />
+          {dot && <View style={{ position: "absolute", top: 3, right: 15, width: 10, height: 10, borderRadius: 5, backgroundColor: T.primary, borderWidth: 2, borderColor: on ? T.primaryContainer : T.container }} />}
         </View>
         <Text style={{ fontFamily: on ? FONT.bold : FONT.medium, fontSize: 12, color: on ? T.ink : T.inkSoft }}>{label}</Text>
       </Pressable>
@@ -732,6 +794,7 @@ function BottomNav({ tab, setTab }) {
   return (
     <View accessibilityRole="tablist" style={{ flexDirection: "row", backgroundColor: T.container, paddingTop: 12, paddingBottom: 16 + insets.bottom }}>
       <Item k="home" label="Kort" icon="card" />
+      <Item k="wheel" label="Hjul" icon="wheel" dot={wheelReady && tab !== "wheel"} />
       <Item k="discover" label="Ställen" icon="pin" />
     </View>
   );
