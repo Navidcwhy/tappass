@@ -1,7 +1,8 @@
 import React from "react";
 import { View, Text, Pressable } from "react-native";
-import { FONT, tone as toneFor } from "../lib/theme";
+import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
+import { expiryText } from "../lib/wheel";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 
@@ -38,6 +39,8 @@ export default function LoyaltyCard({ card, onOpenReward }) {
         {!reward && <Text style={{ fontFamily: FONT.bold, fontSize: 16, color: t.primary }}>{stamps}/{needed}</Text>}
       </View>
 
+      {!!c.bonusExpiresAt && !pending && <BonusBanner expiresAt={c.bonusExpiresAt} />}
+
       {reward ? (
         <View>
           <Text style={{ fontFamily: FONT.bold, fontSize: 12, letterSpacing: 0.96, color: t.primary, marginTop: 18 }}>
@@ -72,6 +75,21 @@ export default function LoyaltyCard({ card, onOpenReward }) {
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+// Dagens hjul: aktiv dubbelstämpel hos butiken.
+function BonusBanner({ expiresAt }) {
+  return (
+    <View accessibilityLabel={"Dubbelstämpel aktiv. Nästa stämpel här ger 2, " + expiryText(expiresAt)} style={{ marginTop: 16, paddingVertical: 10, paddingLeft: 10, paddingRight: 14, borderRadius: 16, backgroundColor: T.lime, flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <Shape kind="burst12" size={40} color={T.primary}>
+        <Text style={{ fontFamily: FONT.display, fontSize: 14, color: "#FFFFFF" }}>×2</Text>
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.bold, fontSize: 15, lineHeight: 20, color: T.onPrimaryContainer }}>Dubbelstämpel aktiv</Text>
+        <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: "#2E3A10" }}>Nästa stämpel här ger 2 · {expiryText(expiresAt, Date.now(), { short: true })}</Text>
+      </View>
     </View>
   );
 }

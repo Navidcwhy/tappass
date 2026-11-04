@@ -2,7 +2,7 @@ import React from "react";
 import {
   CreditCard, MapPin, CircleHelp, X, Check, ArrowRight, Nfc, Search, Gift, Timer,
   WifiOff, CircleAlert, Smartphone, Keyboard, RotateCcw, ChevronsRight, ChevronRight,
-  Megaphone, Info, Link, Share2, ScanLine,
+  Megaphone, Info, Link, Share2, ScanLine, FerrisWheel, ChevronDown, RotateCw, ExternalLink,
   Coffee, Croissant, Utensils, Leaf, IceCream,
 } from "lucide-react-native";
 
@@ -13,6 +13,7 @@ const MAP = {
   nfc: Nfc, search: Search, gift: Gift, timer: Timer, wifiOff: WifiOff, alert: CircleAlert,
   phone: Smartphone, keyboard: Keyboard, reset: RotateCcw, chevrons: ChevronsRight,
   chev: ChevronRight, megaphone: Megaphone, info: Info, link: Link, share: Share2, scan: ScanLine,
+  wheel: FerrisWheel, chevDown: ChevronDown, spin: RotateCw, external: ExternalLink,
   ...CAFE,
 };
 

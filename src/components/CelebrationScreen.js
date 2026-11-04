@@ -39,7 +39,7 @@ function Decor({ tone: t }) {
 
 // Helskärm när en stämpelrad blir full: "Visa koden nu" eller "Spara till senare".
 // Stängs den utan val ligger kortet kvar som "Belöning klar" på hemskärmen.
-export default function CelebrationScreen({ visible, card, busy, onSave, onRedeemNow, onClose }) {
+export default function CelebrationScreen({ visible, card, carry = 0, busy, onSave, onRedeemNow, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
@@ -80,6 +80,16 @@ export default function CelebrationScreen({ visible, card, busy, onSave, onRedee
             <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: t.onContainer, textAlign: "center" }}>{card.reward}</Text>
           </View>
           <Text style={{ marginTop: 8, fontFamily: FONT.regular, fontSize: 15, color: t.muted }}>hos {card.name}</Text>
+          {carry > 0 && (
+            <View style={{ marginTop: 14, height: 32, paddingLeft: 6, paddingRight: 12, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.6)", flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Shape kind="cookie9" size={22} color={t.primary}>
+                <Text style={{ fontFamily: FONT.bold, fontSize: 10, color: "#FFFFFF" }}>+{carry}</Text>
+              </Shape>
+              <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: t.onContainer }}>
+                {carry === 1 ? "1 stämpel sparad till nästa kort" : carry + " stämplar sparade till nästa kort"}
+              </Text>
+            </View>
+          )}
         </View>
 
         <Animated.View style={{ alignSelf: "stretch", opacity: fade, transform: [{ translateY: fade.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] }}>
