@@ -18,12 +18,21 @@ const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
               belöningen (save_reward) och ger koden.
    2. Kod   — helskärm. Personalen skriver in koden i tappass.se/m; appen pollar
               och märker när den är inlöst.
-   3. Inlöst — bekräftelse; kortet börjar om på 0.
+   3. Inlöst — bekräftelse; kortet börjar om på 0 (eller på överskottet, se carryOf).
    ────────────────────────────────────────────────────────────── */
+
+// Stämplar utöver ett fullt kort följer med till nästa kort vid inlösen (v6).
+// Kortet är alltid fullt innan inlösen; efteråt är plånbokens antal redan överskottet.
+const carryOf = (card) => {
+  const needed = Math.max(1, card?.needed || 1);
+  const stamps = Math.max(0, card?.stamps || 0);
+  return stamps >= needed ? stamps - needed : stamps;
+};
 
 export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
   const [stage, setStage] = useState("loading"); // loading | locked | revealed | redeemed
   const [code, setCode] = useState(null);
+  const [carry, setCarry] = useState(0);         // överskottet, låst i ögonblicket koden löstes in
   const [offline, setOffline] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -85,6 +94,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
         alive = false;
         if (timer) clearInterval(timer);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setCarry(carryOf(snap.current));   // kortet före inlösen — plånboken laddas om strax
         setStage("redeemed");
         onRedeemedRef.current(slug);
       }
@@ -119,7 +129,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
       ) : stage === "revealed" ? (
         <CodeScreen card={c} tone={t} code={code} offline={offline} onClose={onClose} />
       ) : (
-        <RedeemedScreen card={c} tone={t} onClose={onClose} />
+        <RedeemedScreen card={c} tone={t} carry={carry} onClose={onClose} />
       )}
     </Modal>
   );
@@ -133,6 +143,7 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, onReveal, onC
     Animated.spring(rise, { toValue: 1, friction: 9, tension: 60, useNativeDriver: true }).start();
   }, []);
   const needed = Math.max(1, card.needed || 1);
+  const carry = Math.min(carryOf(card), needed);
 
   return (
     <View style={{ flex: 1, justifyContent: "flex-end" }}>
@@ -163,7 +174,7 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, onReveal, onC
             <View style={{ marginTop: 20 }}>
               <StepRow tone={t} icon="phone" text="Visa koden när du står i kassan" />
               <StepRow tone={t} icon="keyboard" text="Personalen skriver in den i kassan" />
-              <StepRow tone={t} icon="reset" text={"Kortet börjar om på 0/" + needed + " när koden är inlöst"} />
+              <StepRow tone={t} icon="reset" text={"Kortet börjar om på " + carry + "/" + needed + " när koden är inlöst"} />
             </View>
             <RevealSlider tone={t} saving={saving} onReveal={onReveal} />
             <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: saveFailed ? T.errorText : T.inkSoft, textAlign: "center", marginTop: 12 }}>
@@ -327,13 +338,14 @@ function wavePath(w) {
 }
 
 /* ────────────── 3. INLÖST ────────────── */
-function RedeemedScreen({ card, tone: t, onClose }) {
+function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(pop, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }).start();
   }, []);
   const needed = Math.max(1, card.needed || 1);
+  const start = Math.max(0, Math.min(carry, needed));
 
   return (
     <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
@@ -351,7 +363,9 @@ function RedeemedScreen({ card, tone: t, onClose }) {
 
         <Text style={{ marginTop: 28, fontFamily: FONT.title, fontSize: 45, lineHeight: 52, color: T.ink }}>Inlöst!</Text>
         <Text style={{ marginTop: 8, maxWidth: 300, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }}>
-          Smaklig måltid! Ditt kort hos {card.name} börjar om från noll.
+          {start > 0
+            ? "Smaklig måltid! Ditt kort hos " + card.name + " börjar om med " + (start === 1 ? "1 stämpel" : start + " stämplar") + " som följde med."
+            : "Smaklig måltid! Ditt kort hos " + card.name + " börjar om från noll."}
         </Text>
 
         <View style={{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }}>
@@ -363,10 +377,10 @@ function RedeemedScreen({ card, tone: t, onClose }) {
               <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 16, color: t.onContainer }}>{card.name}</Text>
               <Text style={{ fontFamily: FONT.regular, fontSize: 13, color: t.muted }}>Nästa belöning efter {needed} stämplar</Text>
             </View>
-            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>0/{needed}</Text>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>{start}/{needed}</Text>
           </View>
           <View style={{ marginTop: 12 }}>
-            <StampRow total={needed} filled={0} tone={t} size={24} />
+            <StampRow total={needed} filled={start} tone={t} size={24} />
           </View>
         </View>
       </View>

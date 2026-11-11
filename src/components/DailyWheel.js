@@ -6,7 +6,7 @@ import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { spinWheel, claimWheelPrize } from "../lib/supabase";
 import { getWheelCity, setWheelCity } from "../lib/prefs";
-import { restRotation, targetRotation, countdownText, expiryText, pickCity } from "../lib/wheel";
+import { restRotation, targetRotation, countdownText, expiryText, pickCity, availableIn } from "../lib/wheel";
 import WheelGraphic from "./WheelGraphic";
 import Shape from "./Shape";
 import Confetti from "./Confetti";
@@ -17,12 +17,13 @@ const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
 // Fliken "Dagens hjul". Servern avgör allt (utfall, ett snurr per dag, nästa
 // snurrtid); hjulet snurrar bara till det fält servern svarade med.
-export default function DailyWheel({ status, onReload, onToast, onClaimed, rulesVisible, onOpenRules, onCloseRules }) {
+export default function DailyWheel({ status, onReload, onToast, onClaimed, onCityChange, rulesVisible, onOpenRules, onCloseRules }) {
   const { width } = Dimensions.get("window");
   const size = Math.min(300, Math.max(220, width - 72));
   const rotation = useRef(new Animated.Value(restRotation(0))).current;
   const rotRef = useRef(restRotation(0));
-  const placedRef = useRef(false);
+  const seenTodayRef = useRef(undefined);   // vilket "dagens snurr" hjulet senast ställts efter
+  const spunIdRef = useRef(null);           // snurret hjulet just animerat fram till
   const mounted = useRef(true);
   const [city, setCity] = useState(undefined);   // undefined = inte läst från telefonen än
   const [picker, setPicker] = useState(false);
@@ -46,14 +47,19 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
     if (city === null && ok && cities.length > 0) setPicker(true);
   }, [city, ok, cities.length]);
 
-  // Ställ hjulet på dagens fält en gång — aldrig mitt i ett snurr.
+  // Ställ hjulet på dagens fält när serverns "dagens snurr" ändras (första
+  // laddningen, ett snurr som gjordes medan fliken var stängd, ny dag) — aldrig
+  // mitt i ett snurr, och inte efter ett snurr som hjulet redan animerat fram till.
+  const todayKey = ok && status.today ? status.today.spin_id || "spun" : null;
   useEffect(() => {
-    if (placedRef.current || spinning || !ok) return;
-    placedRef.current = true;
+    if (!ok || spinning) return;
+    if (seenTodayRef.current === todayKey) return;
+    seenTodayRef.current = todayKey;
+    if (todayKey && todayKey === spunIdRef.current) return;
     const r = restRotation(status.today ? status.today.segment : 0);
     rotRef.current = r;
     rotation.setValue(r);
-  }, [status]);
+  }, [ok, todayKey, spinning]);
 
   // Nedräkningen tickar; vid midnatt hämtas nytt läge.
   useEffect(() => {
@@ -68,6 +74,7 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
     setPicker(false);
     setCity(c);
     setWheelCity(c);
+    if (onCityChange) onCityChange(c);
     Haptics.selectionAsync();
   };
 
@@ -77,17 +84,25 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
     setSpinning(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const res = await spinWheel(cityName);
-    if (!mounted.current) return;
+    // Fliken stängdes under anropet: hämta ändå läget, så att appen inte fortsätter
+    // visa "Snurra" och pricken för ett snurr som redan är gjort. Vinsten finns kvar
+    // som "Du har en dubbelstämpel att hämta" när fliken öppnas igen.
+    if (!mounted.current) { if (onReload) onReload(); return; }
     if (!res.ok) {
       setSpinning(false);
       if (res.error === "already_spun") {
         if (onReload) onReload();
         onToast({ type: "info", title: "Du har redan snurrat i dag", subtitle: "Nästa snurr om " + countdownText(res.next_spin_at) + "." }, 3500);
+      } else if (res.error === "all_bonused") {
+        if (onReload) onReload();
+        onToast({ type: "info", icon: "gift", title: "Du har redan dubbelstämplar i " + cityName, subtitle: "Använd en av dem, så kan du snurra igen." }, 4500);
       } else if (res.error === "no_places") {
         onToast({ type: "info", icon: "pin", title: "Inga ställen i " + cityName + " än", subtitle: "Välj en annan stad ovanför hjulet." }, 4000);
       } else if (res.error === "no_city") {
         setPicker(true);
       } else {
+        // Svaret kan ha tappats efter att servern sparat snurret — stäm av läget.
+        if (onReload) onReload();
         onToast({ type: "network" }, 4000);
       }
       return;
@@ -95,7 +110,8 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
     const target = targetRotation(rotRef.current, res.segment, { jitter: Math.random() * 20 - 10 });
     Animated.timing(rotation, { toValue: target, duration: SPIN_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
       rotRef.current = target;
-      if (!mounted.current) return;
+      spunIdRef.current = res.spin_id || "spun";
+      if (!mounted.current) { if (onReload) onReload(); return; }
       setSpinning(false);
       if (onReload) onReload();
       if (res.won) {
@@ -108,54 +124,73 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
     });
   };
 
+  // Reglerna ska gå att öppna (hjälpknappen) i alla lägen, även när hjulet laddar.
+  const rules = <RulesSheet visible={!!rulesVisible} onClose={onCloseRules} />;
+
   if (!status) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 60 }}>
         <ActivityIndicator color={T.inkMute} />
+        {rules}
       </View>
     );
   }
 
   if (!ok) {
     return (
-      <CenterNote
-        icon="wifiOff"
-        title="Hjulet går inte att nå just nu"
-        text="Kontrollera anslutningen och försök igen."
-        action="Försök igen"
-        onAction={onReload}
-      />
+      <View style={{ flex: 1 }}>
+        <CenterNote
+          icon="wifiOff"
+          title="Hjulet går inte att nå just nu"
+          text="Kontrollera anslutningen och försök igen."
+          action="Försök igen"
+          onAction={onReload}
+        />
+        {rules}
+      </View>
     );
-  }
-
-  if (cities.length === 0) {
-    return <CenterNote icon="wheel" title="Dagens hjul startar snart" text="Det finns inga ställen med i hjulet än." />;
   }
 
   const canSpin = !!status.can_spin;
   const prize = status.prize && Array.isArray(status.prize.offers) && status.prize.offers.length > 0 ? status.prize : null;
   const bonuses = Array.isArray(status.bonuses) ? status.bonuses : [];
+  // Inga ställen med i hjulet (t.ex. kampanjen pausad): visa ändå oupphämtade
+  // vinster och aktiva dubbelstämplar — de gäller fortfarande.
+  const noCities = cities.length === 0;
+  // v7: kunden har redan dubbelstämpel hos alla ställen i staden. Snurret kan inte
+  // ge något att välja; det förbrukas inte och går att göra när en bonus använts.
+  const blocked = canSpin && !!cityName && availableIn(cityName, cities) === 0;
 
   return (
     <View style={{ paddingBottom: 8 }}>
-      <CityBox city={cityName} disabled={spinning} onPress={() => setPicker(true)} />
-
-      <View style={{ alignItems: "center", marginTop: 30 }}>
-        <WheelGraphic size={size} rotation={rotation} />
-      </View>
-
-      {spinning ? (
-        <SpinButton label="Snurrar …" busy />
-      ) : canSpin ? (
-        <SpinButton label="Snurra" icon="spin" onPress={spin} />
+      {noCities ? (
+        <CenterNote icon="wheel" title="Dagens hjul startar snart" text="Det finns inga ställen med i hjulet än." />
       ) : (
-        <SpinButton label={"Nästa snurr om " + countdownText(status.next_spin_at, now)} icon="timer" muted />
-      )}
+        <>
+          <CityBox city={cityName} disabled={spinning} onPress={() => setPicker(true)} />
 
-      <Text style={{ marginTop: 14, marginHorizontal: 8, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft, textAlign: "center" }}>
-        {canSpin ? "Gratis · 1 snurr per dag · 4 av 10 fält ger dubbelstämpel · " : "Nytt snurr varje dag kl. 00.00 · "}
-        <Text accessibilityRole="link" onPress={onOpenRules} style={{ fontFamily: FONT.semibold, color: T.primary, textDecorationLine: "underline" }}>Regler</Text>
-      </Text>
+          <View style={{ alignItems: "center", marginTop: 30 }}>
+            <WheelGraphic size={size} rotation={rotation} />
+          </View>
+
+          {spinning ? (
+            <SpinButton label="Snurrar …" busy />
+          ) : blocked ? (
+            <SpinButton label="Använd en dubbelstämpel först" icon="gift" muted />
+          ) : canSpin ? (
+            <SpinButton label="Snurra" icon="spin" onPress={spin} />
+          ) : (
+            <SpinButton label={"Nästa snurr om " + countdownText(status.next_spin_at, now)} icon="timer" muted />
+          )}
+
+          <Text style={{ marginTop: 14, marginHorizontal: 8, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft, textAlign: "center" }}>
+            {blocked
+              ? "Du har dubbelstämplar hos alla ställen i " + cityName + ". Använd en av dem, så kan du snurra igen · "
+              : canSpin ? "Gratis · 1 snurr per dag · 4 av 10 fält ger dubbelstämpel · " : "Nytt snurr varje dag kl. 00.00 · "}
+            <Text accessibilityRole="link" onPress={onOpenRules} style={{ fontFamily: FONT.semibold, color: T.primary, textDecorationLine: "underline" }}>Regler</Text>
+          </Text>
+        </>
+      )}
 
       {prize && !win && (
         <PrizeBanner
@@ -167,17 +202,25 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, rules
 
       {bonuses.length > 0 && <BonusList bonuses={bonuses} now={now} />}
 
-      <CityPicker visible={picker} cities={cities} current={cityName} onPick={chooseCity} onClose={() => setPicker(false)} />
+      {!noCities && <CityPicker visible={picker} cities={cities} current={cityName} onPick={chooseCity} onClose={() => setPicker(false)} />}
       <WinSheet
         win={win}
-        onClose={() => setWin(null)}
+        onClose={() => {
+          setWin(null);
+          if (onReload) onReload();   // stäm av: ett tappat svar kan ha hämtat vinsten
+        }}
         onClaimed={(cafe, expiresAt) => {
           setWin(null);
           if (onReload) onReload();
           if (onClaimed) onClaimed(cafe, expiresAt);
         }}
+        onAlreadyClaimed={() => {
+          setWin(null);
+          if (onReload) onReload();
+          if (onClaimed) onClaimed(null, null);
+        }}
       />
-      <RulesSheet visible={!!rulesVisible} onClose={onCloseRules} />
+      {rules}
     </View>
   );
 }
@@ -408,7 +451,7 @@ function RulesSheet({ visible, onClose }) {
 
 // Vinst: konfetti + välj 1 av 3 ställen. Stängs arket utan val ligger vinsten
 // kvar och kan hämtas från fliken fram till sista giltiga dag.
-function WinSheet({ win, onClose, onClaimed }) {
+function WinSheet({ win, onClose, onClaimed, onAlreadyClaimed }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const [picked, setPicked] = useState(null);
@@ -439,10 +482,15 @@ function WinSheet({ win, onClose, onClaimed }) {
       onClaimed(r.cafe || chosen.cafe, r.expires_at);
       return;
     }
+    if (r.error === "already_claimed") {
+      // Vinsten är redan hämtad — t.ex. när svaret på förra försöket tappades men
+      // servern sparade valet. Stäng och visa kortet i stället för ett felmeddelande.
+      onAlreadyClaimed();
+      return;
+    }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     if (r.error === "bonus_exists") setErr("Du har redan en dubbelstämpel hos " + chosen.cafe.name + ". Välj ett annat ställe.");
     else if (r.error === "expired") setErr("Vinsten har tyvärr gått ut.");
-    else if (r.error === "already_claimed") setErr("Vinsten är redan hämtad.");
     else if (r.error === "not_offered") setErr("Det stället går inte att välja längre. Välj ett annat.");
     else setErr("Ingen anslutning just nu. Försök igen.");
   };
