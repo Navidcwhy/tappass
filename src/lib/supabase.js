@@ -9,17 +9,26 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 const DEVICE_KEY = "tappass.device_id";
-let cachedDeviceId = null;
+let deviceIdPromise = null;
 
-export async function getDeviceId() {
-  if (cachedDeviceId) return cachedDeviceId;
-  let id = await AsyncStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = "d_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-    await AsyncStorage.setItem(DEVICE_KEY, id);
+// Ett enda id per installation. Alla samtidiga anrop väntar på samma läsning —
+// annars kan första start (t.ex. via en tagglänk) skapa flera id:n, och den
+// första stämpeln hamnar på ett id som appen sedan glömmer.
+export function getDeviceId() {
+  if (!deviceIdPromise) {
+    deviceIdPromise = (async () => {
+      let id = await AsyncStorage.getItem(DEVICE_KEY);
+      if (!id) {
+        id = "d_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+        await AsyncStorage.setItem(DEVICE_KEY, id);
+      }
+      return id;
+    })().catch((e) => {
+      deviceIdPromise = null;   // försök igen vid nästa anrop
+      throw e;
+    });
   }
-  cachedDeviceId = id;
-  return id;
+  return deviceIdPromise;
 }
 
 // Returns the RPC's own jsonb ({ ok, error: "unknown_tag" | "pending_reward" |
@@ -89,7 +98,8 @@ export async function wheelStatus() {
 
 // Staden skickas med men sparas inte på servern.
 // { ok, spin_id, won, segment, next_spin_at, claim_until, offers } eller
-// { ok: false, error: "already_spun" | "no_places" | "no_city" | "network" }
+// { ok: false, error: "already_spun" | "no_places" | "all_bonused" | "no_city" | "network" }
+// all_bonused (v7): kunden har redan en aktiv dubbelstämpel hos alla ställen i staden.
 export async function spinWheel(city) {
   const device_id = await getDeviceId();
   return wheelRpc("spin_wheel", { p_device_id: device_id, p_city: city });

@@ -57,6 +57,22 @@ export function expiryText(expiresAt, now = Date.now(), { short = false } = {}) 
   return "t.o.m. " + day + " 23.59";
 }
 
+// En dubbelstämpel räknas bara som aktiv fram till utgångstiden — även om
+// plånboken i appen är gammal (cache, appen låg i bakgrunden).
+export function isActiveUntil(expiresAt, now = Date.now()) {
+  const t = Date.parse(expiresAt);
+  return Number.isFinite(t) && t > now;
+}
+
+// Hur många ställen i staden kunden kan vinna just nu (v7: `available`).
+// 0 = kunden har redan dubbelstämpel hos alla. null = staden finns inte i listan.
+export function availableIn(city, cities) {
+  const key = String(city || "").toLowerCase();
+  const c = (Array.isArray(cities) ? cities : []).find((x) => x && String(x.city).toLowerCase() === key);
+  if (!c) return null;
+  return typeof c.available === "number" ? c.available : c.places;
+}
+
 // Städer från servern, med användarens sparade stad först om den finns.
 export function pickCity(saved, cities) {
   const list = Array.isArray(cities) ? cities : [];

@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, Pressable } from "react-native";
 import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
-import { expiryText } from "../lib/wheel";
+import { expiryText, isActiveUntil } from "../lib/wheel";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 
@@ -39,7 +39,7 @@ export default function LoyaltyCard({ card, onOpenReward }) {
         {!reward && <Text style={{ fontFamily: FONT.bold, fontSize: 16, color: t.primary }}>{stamps}/{needed}</Text>}
       </View>
 
-      {!!c.bonusExpiresAt && !pending && <BonusBanner expiresAt={c.bonusExpiresAt} />}
+      {!pending && isActiveUntil(c.bonusExpiresAt) && <BonusBanner expiresAt={c.bonusExpiresAt} />}
 
       {reward ? (
         <View>

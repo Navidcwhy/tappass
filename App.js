@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform, TextInput, Share, Linking as RNLinking } from "react-native";
+import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -11,9 +11,9 @@ import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
 import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus } from "./src/lib/supabase";
-import { hasOnboarded, markOnboarded } from "./src/lib/prefs";
+import { hasOnboarded, markOnboarded, getWheelCity } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
-import { expiryText } from "./src/lib/wheel";
+import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
 import LoyaltyCard from "./src/components/LoyaltyCard";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
@@ -65,11 +65,16 @@ function walletFromRows(rows) {
 // AsyncStorage). Network is never part of it.
 const LOCAL_BOOT_CAP_MS = 2000;
 
-function tokenFromUrl(url) {
+// https://tappass.se/t/<token>, tappass:///t/<token> och tappass://t/<token>.
+// I den sista formen tolkas "t" som värdnamn och sökvägen blir bara token —
+// tappass.se/t/… länkar dit från "Jag har redan appen" på iPhone.
+export function tokenFromUrl(url) {
   if (!url) return null;
   try {
     const parsed = Linking.parse(url);
-    const path = (parsed.path || "").replace(/^\/+/, "");
+    let path = (parsed.path || "").replace(/^\/+/, "");
+    const scheme = String(parsed.scheme || "").toLowerCase();
+    if (parsed.hostname === "t" && scheme !== "http" && scheme !== "https") path = "t/" + path;
     const m = path.match(/^t\/([a-z0-9_-]+)/i);
     return m ? m[1].toLowerCase() : null;
   } catch { return null; }
@@ -93,6 +98,7 @@ export default function App() {
   const [stampCard, setStampCard] = useState(null);  // "Ny stämpel"-arket
   const [celebrationCarry, setCelebrationCarry] = useState(0);  // överskott som följer med till nästa kort
   const [wheel, setWheel] = useState(null);          // Dagens hjul: serverns läge (null = inte hämtat)
+  const [wheelCity, setWheelCityState] = useState(null);   // vald stad (sparas bara på telefonen)
   const [rulesOpen, setRulesOpen] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [bottomH, setBottomH] = useState(96);
@@ -100,6 +106,25 @@ export default function App() {
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
 
   const nfc = useNfcStatus();
+
+  // Dagens hjul: hämta läget. Varje hämtning numreras och ett svar används bara
+  // om ingen senare hämtning redan gett ett giltigt läge — ett långsamt svar från
+  // appstarten får aldrig skriva över läget efter ett snurr. Ett nätfel ersätter
+  // inte ett känt läge.
+  const wheelSeq = useRef(0);
+  const wheelApplied = useRef(0);
+  const loadWheel = useCallback(async () => {
+    const seq = ++wheelSeq.current;
+    const s = await wheelStatus();
+    if (seq < wheelApplied.current) return s;
+    if (s && s.ok) {
+      wheelApplied.current = seq;
+      setWheel(s);
+    } else {
+      setWheel((prev) => (prev && prev.ok ? prev : s));
+    }
+    return s;
+  }, []);
 
   // Startup. The splash must only wait for LOCAL work (bundled fonts, NFC start,
   // cached wallet from AsyncStorage). Supabase is refreshed in the background —
@@ -132,22 +157,16 @@ export default function App() {
       // Show the intro only on the first launch, not on every start.
       // Independent of the network so a slow backend can't delay or swallow it.
       hasOnboarded().then((done) => { if (!done) setTimeout(() => setShowOnboarding(true), 1500); });
+      getWheelCity().then((c) => { if (c) setWheelCityState(c); }).catch(() => {});
 
       // Background refresh. null = request failed -> keep cached state.
-      const [cafes, rows, wheelNow] = await Promise.all([loadCafes(), loadWallet(), wheelStatus()]);
+      // Hjulets läge sätter loadWheel själv (med ordningsskydd).
+      const [cafes, rows] = await Promise.all([loadCafes(), loadWallet(), loadWheel()]);
       syncedRef.current = true;
       if (cafes) setAllCafes(cafes.map(normalizeCafe));
       if (rows) setWallet(walletFromRows(rows));
-      setWheel(wheelNow);
       setSynced(true);
     })();
-  }, []);
-
-  // Dagens hjul: hämta läget igen. Ett nätfel ersätter inte ett känt läge.
-  const loadWheel = useCallback(async () => {
-    const s = await wheelStatus();
-    setWheel((prev) => (s && s.ok ? s : prev && prev.ok ? prev : s));
-    return s;
   }, []);
 
   // Reglerna hör till hjulfliken — stäng dem när man byter flik.
@@ -168,6 +187,32 @@ export default function App() {
     if (!rows) return;   // request failed — keep current state
     setWallet(walletFromRows(rows));
   }, []);
+
+  // Tillbaka från bakgrunden: hämta kort och hjul igen. Annars kan appen visa en
+  // utgången dubbelstämpel eller sakna pricken för dagens snurr tills något laddar om.
+  useEffect(() => {
+    let last = AppState.currentState;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (last === "background" && next === "active" && syncedRef.current) {
+        refreshWallet();
+        loadWheel();
+      }
+      last = next;
+    });
+    return () => sub.remove();
+  }, [refreshWallet, loadWheel]);
+
+  // Nytt snurr vid midnatt: hämta läget när serverns nästa snurrtid passerats,
+  // så att pricken på Hjul-fliken dyker upp även om appen står öppen.
+  // (Kontroll varje minut i stället för en lång timer — Android varnar för timers
+  // på flera minuter, och en minuts fördröjning spelar ingen roll här.)
+  useEffect(() => {
+    if (!wheel || !wheel.ok || wheel.can_spin || !wheel.next_spin_at) return;
+    const due = Date.parse(wheel.next_spin_at);
+    if (!Number.isFinite(due)) return;
+    const id = setInterval(() => { if (Date.now() >= due + 2000) loadWheel(); }, 60000);
+    return () => clearInterval(id);
+  }, [wheel, loadWheel]);
 
   // Ett meddelande i taget; ett nytt ersätter det gamla och får full visningstid.
   const toastTimer = useRef(null);
@@ -311,6 +356,7 @@ export default function App() {
   };
 
   // Dagens hjul: vinsten är hämtad → kortet med bonusen syns under Kort.
+  // cafe = null: servern hade redan sparat valet (ett tidigare svar tappades).
   const onWheelClaimed = async (cafe, expiresAt) => {
     await refreshWallet();
     setTab("home");
@@ -321,11 +367,17 @@ export default function App() {
         title: "Dubbelstämpel hos " + cafe.name,
         subtitle: "Nästa stämpel där ger 2 · " + expiryText(expiresAt),
       }, 4500);
+    } else {
+      showToast({ type: "info", icon: "gift", title: "Vinsten är redan hämtad", subtitle: "Dubbelstämpeln syns på kortet." }, 4000);
     }
   };
 
   const titles = { home: "Dina kort", wheel: "Dagens hjul", discover: "Ställen" };
-  const wheelReady = !!(wheel && wheel.ok && (wheel.can_spin || wheel.prize) && (wheel.cities || []).length > 0);
+  // Pricken på Hjul: oupphämtad vinst, eller ett snurr som faktiskt kan ge något i
+  // kundens stad (inte när kunden redan har dubbelstämpel hos alla ställen där).
+  const cityAvail = wheelCity && wheel && wheel.ok ? availableIn(wheelCity, wheel.cities) : null;
+  const wheelReady = !!(wheel && wheel.ok && (wheel.cities || []).length > 0 &&
+    (wheel.prize || (wheel.can_spin && cityAvail !== 0)));
 
   // Dev-only: the simulate row sends the same tap_token call as a physical tag.
   // Never shipped to production (__DEV__ is false in EAS production/preview builds).
@@ -369,6 +421,7 @@ export default function App() {
               onReload={loadWheel}
               onToast={showToast}
               onClaimed={onWheelClaimed}
+              onCityChange={setWheelCityState}
               rulesVisible={rulesOpen}
               onOpenRules={() => setRulesOpen(true)}
               onCloseRules={() => setRulesOpen(false)}
@@ -569,6 +622,7 @@ function PlaceCard({ cafe, card }) {
   const progress = card
     ? (card.pendingReward || card.stamps >= card.needed ? "Klar" : card.stamps + "/" + card.needed)
     : null;
+  const bonusOn = !!card && isActiveUntil(card.bonusExpiresAt);
   return (
     <View style={{ padding: 16, borderRadius: 24, backgroundColor: t.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
       <Shape kind="cookie9" size={52} color={t.primary}>
@@ -584,14 +638,14 @@ function PlaceCard({ cafe, card }) {
           </Text>
         </View>
       </View>
-      {(!!progress || !!card?.bonusExpiresAt) && (
+      {(!!progress || bonusOn) && (
         <View style={{ alignSelf: "flex-start", alignItems: "flex-end", gap: 6 }}>
           {!!progress && (
             <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: t.primary }}>
               <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: "#FFFFFF" }}>{progress}</Text>
             </View>
           )}
-          {!!card?.bonusExpiresAt && (
+          {bonusOn && (
             <View accessibilityLabel="Dubbelstämpel aktiv" style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: T.lime }}>
               <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: T.onPrimaryContainer }}>×2</Text>
             </View>
