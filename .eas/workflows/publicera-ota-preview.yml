@@ -1,0 +1,12 @@
+# Publicerar en OTA-uppdatering (EAS Update) till kanalen preview (preview-APK:n på Android).
+# Körs bara manuellt (Expo-kopplingen: workflow_run, eller `eas workflow:run publicera-ota-preview.yml`).
+# Kräver att GitHub-repot är kopplat till Expo-projektet (expo.dev → Project settings → GitHub).
+name: Publicera OTA till preview
+jobs:
+  publicera:
+    name: Publicera OTA (preview)
+    type: update
+    params:
+      channel: preview
+      platform: android
+      message: Publicerad via EAS Workflow

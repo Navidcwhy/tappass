@@ -1,0 +1,13 @@
+# Publicerar en OTA-uppdatering (EAS Update) till kanalen production — Android och iOS.
+# Körs bara manuellt (Expo-kopplingen: workflow_run, eller `eas workflow:run publicera-ota-production.yml`).
+# Ingen automatisk trigger: produktion publiceras bara efter Navids uttryckliga godkännande.
+# Kräver att GitHub-repot är kopplat till Expo-projektet (expo.dev → Project settings → GitHub).
+name: Publicera OTA till produktion
+jobs:
+  publicera:
+    name: Publicera OTA (production)
+    type: update
+    params:
+      channel: production
+      platform: all
+      message: Publicerad via EAS Workflow
