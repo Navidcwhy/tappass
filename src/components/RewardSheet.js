@@ -8,6 +8,7 @@ import { Icon } from "../lib/icons";
 import { saveReward, getCurrentSavedCode } from "../lib/supabase";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
+import InkSplash from "./InkSplash";
 
 const { width: W, height: H } = Dimensions.get("window");
 const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
@@ -17,9 +18,15 @@ const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
    1. Låst  — ark med förklaring + "Dra för att visa koden". Att dra sparar
               belöningen (save_reward) och ger koden.
    2. Kod   — helskärm. Personalen skriver in koden i tappass.se/m; appen pollar
-              och märker när den är inlöst.
-   3. Inlöst — bekräftelse; kortet börjar om på 0 (eller på överskottet, se carryOf).
+              och märker när den är inlöst. Då löses siffrorna upp i partiklar.
+   3. Inlöst — en stor bock; stämplarna lyfter från kortet, som börjar om på 0
+              (eller på överskottet, se carryOf).
    ────────────────────────────────────────────────────────────── */
+
+const DISSOLVE_MS = 800;   // koden löses upp innan "Inlöst!" visas
+const DIGIT_GAP = 45;      // ms mellan siffrorna när de löses upp
+const RESET_AT = 950;      // ms efter "Inlöst!" när stämplarna börjar lyfta
+const LIFT_GAP = 70;       // ms mellan stämplarna som lyfter
 
 // Stämplar utöver ett fullt kort följer med till nästa kort vid inlösen (v6).
 // Kortet är alltid fullt innan inlösen; efteråt är plånbokens antal redan överskottet.
@@ -30,7 +37,7 @@ const carryOf = (card) => {
 };
 
 export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
-  const [stage, setStage] = useState("loading"); // loading | locked | revealed | redeemed
+  const [stage, setStage] = useState("loading"); // loading | locked | revealed | dissolve | redeemed
   const [code, setCode] = useState(null);
   const [carry, setCarry] = useState(0);         // överskottet, låst i ögonblicket koden löstes in
   const [offline, setOffline] = useState(false);
@@ -95,7 +102,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
         if (timer) clearInterval(timer);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setCarry(carryOf(snap.current));   // kortet före inlösen — plånboken laddas om strax
-        setStage("redeemed");
+        setStage("dissolve");
         onRedeemedRef.current(slug);
       }
     };
@@ -104,6 +111,13 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     timer = setInterval(check, 2000);
     return () => { alive = false; if (timer) clearInterval(timer); };
   }, [stage, slug, visible]);
+
+  // Koden har lösts in: siffrorna löses upp, sedan kommer bekräftelsen.
+  useEffect(() => {
+    if (stage !== "dissolve") return;
+    const t = setTimeout(() => setStage("redeemed"), DISSOLVE_MS);
+    return () => clearTimeout(t);
+  }, [stage]);
 
   if (!visible || !c) return null;
 
@@ -126,8 +140,8 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       {stage === "loading" || stage === "locked" ? (
         <LockedSheet card={c} tone={t} loading={stage === "loading"} saving={saving} saveFailed={saveFailed} onReveal={handleReveal} onClose={onClose} />
-      ) : stage === "revealed" ? (
-        <CodeScreen card={c} tone={t} code={code} offline={offline} onClose={onClose} />
+      ) : stage === "revealed" || stage === "dissolve" ? (
+        <CodeScreen card={c} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onClose={onClose} />
       ) : (
         <RedeemedScreen card={c} tone={t} carry={carry} onClose={onClose} />
       )}
@@ -258,16 +272,30 @@ function RevealSlider({ tone: t, saving, onReveal }) {
 }
 
 /* ────────────── 2. KODEN — HELSKÄRM ────────────── */
-function CodeScreen({ card, tone: t, code, offline, onClose }) {
+function CodeScreen({ card, tone: t, code, offline, dissolving, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
+  const gone = useRef(new Animated.Value(0)).current;   // 0 → 1 medan koden löses upp
   useEffect(() => {
     Animated.spring(pop, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
   }, []);
+  useEffect(() => {
+    if (!dissolving) return;
+    const a = Animated.timing(gone, { toValue: 1, duration: DISSOLVE_MS, easing: Easing.linear, useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [dissolving]);
 
   // Formen skalas ner på låga skärmar så att allt får plats utan att skrolla.
   const S = Math.round(Math.min(320, W - 40, H * 0.42));
-  const lines = code ? code.slice(0, 3) + "\n" + code.slice(3) : "···\n···";
+  const rows = code ? [code.slice(0, 3), code.slice(3)] : ["···", "···"];
+  const fs = Math.round(S * 0.275);
+  const box = Math.round(fs * 1.12);           // hela glyfen får plats (Android klipper annars)
+  const pitch = Math.round(S * 0.265);         // avstånd mellan raderna, som förut
+  const shrink = { inputRange: [0, 0.4, 1], outputRange: [1, 1.05, 0.4] };
+  const fadeLate = gone.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1, 0] });
+  const fadeEarly = gone.interpolate({ inputRange: [0, 0.25], outputRange: [1, 0], extrapolate: "clamp" });
+  const splash = [t.primary, t.deco, T.lime, t.onContainer];
 
   return (
     <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
@@ -280,32 +308,41 @@ function CodeScreen({ card, tone: t, code, offline, onClose }) {
 
       <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
         <Animated.View style={{ width: S, height: S, alignItems: "center", justifyContent: "center", opacity: pop, transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }}>
-          <Shape kind="sunny8" size={Math.round(S * 1.04)} color={t.light} rotate={12} style={{ position: "absolute", left: -Math.round(S * 0.02), top: -Math.round(S * 0.02) }} />
-          <Shape kind="cookie12" size={Math.round(S * 0.94)} color={t.container} style={{ position: "absolute", left: Math.round(S * 0.03), top: Math.round(S * 0.03) }} />
-          <Text style={{ fontFamily: FONT.bold, fontSize: 12, letterSpacing: 1.44, color: t.muted }}>DIN KOD</Text>
-          <Text
-            accessibilityLabel={"Kod " + (code ? code.split("").join(" ") : "")}
-            style={{ marginTop: 6, fontFamily: FONT.display, fontSize: Math.round(S * 0.275), lineHeight: Math.round(S * 0.265), textAlign: "center", color: t.onContainer }}
-          >{lines}</Text>
+          <Animated.View style={{ position: "absolute", left: -Math.round(S * 0.02), top: -Math.round(S * 0.02), opacity: fadeLate, transform: [{ scale: gone.interpolate(shrink) }, { rotate: gone.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "50deg"] }) }] }}>
+            <Shape kind="sunny8" size={Math.round(S * 1.04)} color={t.light} rotate={12} />
+          </Animated.View>
+          <Animated.View style={{ position: "absolute", left: Math.round(S * 0.03), top: Math.round(S * 0.03), opacity: fadeLate, transform: [{ scale: gone.interpolate(shrink) }] }}>
+            <Shape kind="cookie12" size={Math.round(S * 0.94)} color={t.container} />
+          </Animated.View>
+          <Animated.Text style={{ fontFamily: FONT.bold, fontSize: 12, letterSpacing: 1.44, color: t.muted, opacity: fadeEarly }}>DIN KOD</Animated.Text>
+          <View accessible accessibilityLabel={"Kod " + (code ? code.split("").join(" ") : "")} style={{ marginTop: 6, alignItems: "center" }}>
+            {rows.map((row, r) => (
+              <View key={r} style={{ flexDirection: "row", marginTop: r ? pitch - box : 0 }}>
+                {row.split("").map((ch, i) => (
+                  <Digit key={i} ch={ch} delay={(r * 3 + i) * DIGIT_GAP} dissolving={dissolving} size={fs} box={box} color={t.onContainer} splash={splash} />
+                ))}
+              </View>
+            ))}
+          </View>
         </Animated.View>
 
-        <Text style={{ marginTop: 24, fontFamily: FONT.title, fontSize: 26, lineHeight: 31, textAlign: "center", color: T.ink }}>{card.reward}</Text>
-        <Text style={{ marginTop: 6, fontFamily: FONT.regular, fontSize: 16, lineHeight: 22, color: T.inkSoft, textAlign: "center" }}>Visa koden för personalen i kassan.</Text>
+        <Animated.Text style={{ marginTop: 24, fontFamily: FONT.title, fontSize: 26, lineHeight: 31, textAlign: "center", color: T.ink, opacity: fadeLate }}>{card.reward}</Animated.Text>
+        <Animated.Text style={{ marginTop: 6, fontFamily: FONT.regular, fontSize: 16, lineHeight: 22, color: T.inkSoft, textAlign: "center", opacity: fadeEarly }}>Visa koden för personalen i kassan.</Animated.Text>
 
-        <View style={{ marginTop: 28, alignItems: "center", gap: 10 }}>
+        <Animated.View style={{ marginTop: 28, alignItems: "center", gap: 10, opacity: fadeEarly }}>
           <Text style={{ fontFamily: FONT.semibold, fontSize: 15, lineHeight: 20, color: offline ? T.errorText : T.ink, textAlign: "center" }}>
             {offline ? "Ingen anslutning — koden gäller ändå. Försöker igen…" : "Väntar på bekräftelse"}
           </Text>
           <WaveProgress color={t.primary} width={Math.min(310, W - 64)} />
-        </View>
+        </Animated.View>
       </View>
 
-      <View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.container }}>
+      <Animated.View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.container, opacity: fadeEarly }}>
         <Icon name="info" size={20} color={T.inkSoft} />
         <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>
           Nya stämplar hos {card.name} pausas tills koden är inlöst.
         </Text>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -337,15 +374,57 @@ function wavePath(w) {
   return d;
 }
 
+// En siffra i koden. När koden lösts in flyger den isär: lyfter, snurrar och
+// krymper medan bläckstänk i butikens färger sprutar ut från den.
+function Digit({ ch, delay, dissolving, size, box, color, splash }) {
+  const p = useRef(new Animated.Value(0)).current;
+  const dir = useRef({ dx: (Math.random() * 2 - 1) * 34, dy: -(24 + Math.random() * 46), rot: (Math.random() * 2 - 1) * 40 }).current;
+  useEffect(() => {
+    if (!dissolving) return;
+    const a = Animated.timing(p, { toValue: 1, duration: 480, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [dissolving]);
+  return (
+    <View>
+      <Animated.Text style={{
+        fontFamily: FONT.display, fontSize: size, lineHeight: box, textAlign: "center", color,
+        opacity: p.interpolate({ inputRange: [0, 0.3, 1], outputRange: [1, 0.9, 0] }),
+        transform: [
+          { translateX: p.interpolate({ inputRange: [0, 1], outputRange: [0, dir.dx] }) },
+          { translateY: p.interpolate({ inputRange: [0, 1], outputRange: [0, dir.dy] }) },
+          { rotate: p.interpolate({ inputRange: [0, 1], outputRange: ["0deg", dir.rot + "deg"] }) },
+          { scale: p.interpolate({ inputRange: [0, 0.2, 1], outputRange: [1, 1.15, 0.3] }) },
+        ],
+      }}>{ch}</Animated.Text>
+      {dissolving && <InkSplash colors={splash} count={9} radius={Math.round(size * 0.8)} delay={delay} />}
+    </View>
+  );
+}
+
 /* ────────────── 3. INLÖST ────────────── */
 function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.spring(pop, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }).start();
-  }, []);
+  const tick = useRef(new Animated.Value(0)).current;
+  const rise = useRef(new Animated.Value(0)).current;
   const needed = Math.max(1, card.needed || 1);
   const start = Math.max(0, Math.min(carry, needed));
+  const lifts = needed - start;   // stämplar som lyfter från kortet
+  const [reset, setReset] = useState(lifts === 0);
+
+  useEffect(() => {
+    Animated.spring(pop, { toValue: 1, friction: 5, tension: 60, useNativeDriver: true }).start();
+    Animated.spring(tick, { toValue: 1, friction: 4, tension: 110, delay: 160, useNativeDriver: true }).start();
+    Animated.timing(rise, { toValue: 1, duration: 420, delay: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    const timers = [setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium), 160)];
+    if (lifts > 0) {
+      timers.push(setTimeout(() => { setReset(true); Haptics.selectionAsync(); }, RESET_AT + lifts * LIFT_GAP + 260));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, []);
+  const exits = Array.from({ length: lifts }, (_, k) => ({ index: needed - 1 - k, delay: RESET_AT + k * LIFT_GAP }));
+  const slide = (from) => ({ opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] });
 
   return (
     <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
@@ -354,21 +433,26 @@ function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
       </Pressable>
 
       <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
-        <Animated.View style={{ width: 240, height: 240, alignItems: "center", justifyContent: "center", transform: [{ scale: pop }] }}>
-          <Shape kind="sunny8" size={240} color={t.container} rotate={8} style={{ position: "absolute", left: 0, top: 0 }} />
-          <Shape kind="cookie12" size={180} color={t.primary}>
-            <Icon name="check" size={84} color="#FFFFFF" strokeWidth={2.6} />
-          </Shape>
-        </Animated.View>
+        <View style={{ width: 240, height: 240 }}>
+          <Animated.View style={{ width: 240, height: 240, alignItems: "center", justifyContent: "center", transform: [{ scale: pop }] }}>
+            <Shape kind="sunny8" size={240} color={t.container} rotate={8} style={{ position: "absolute", left: 0, top: 0 }} />
+            <Shape kind="cookie12" size={180} color={t.primary}>
+              <Animated.View style={{ opacity: tick, transform: [{ scale: tick.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] }) }, { rotate: tick.interpolate({ inputRange: [0, 1], outputRange: ["-30deg", "0deg"] }) }] }}>
+                <Icon name="check" size={84} color="#FFFFFF" strokeWidth={2.6} />
+              </Animated.View>
+            </Shape>
+          </Animated.View>
+          <InkSplash colors={[T.lime, t.primary, t.deco, T.lime]} count={16} radius={150} delay={120} />
+        </View>
 
-        <Text style={{ marginTop: 28, fontFamily: FONT.title, fontSize: 45, lineHeight: 52, color: T.ink }}>Inlöst!</Text>
-        <Text style={{ marginTop: 8, maxWidth: 300, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }}>
+        <Animated.Text style={[{ marginTop: 28, fontFamily: FONT.title, fontSize: 45, lineHeight: 52, color: T.ink }, slide(14)]}>Inlöst!</Animated.Text>
+        <Animated.Text style={[{ marginTop: 8, maxWidth: 300, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft, textAlign: "center" }, slide(18)]}>
           {start > 0
             ? "Smaklig måltid! Ditt kort hos " + card.name + " börjar om med " + (start === 1 ? "1 stämpel" : start + " stämplar") + " som följde med."
             : "Smaklig måltid! Ditt kort hos " + card.name + " börjar om från noll."}
-        </Text>
+        </Animated.Text>
 
-        <View style={{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }}>
+        <Animated.View style={[{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }, slide(28)]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Shape kind="cookie9" size={36} color={t.primary}>
               <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: "#FFFFFF" }}>{initialOf(card.name)}</Text>
@@ -377,12 +461,13 @@ function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
               <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 16, color: t.onContainer }}>{card.name}</Text>
               <Text style={{ fontFamily: FONT.regular, fontSize: 13, color: t.muted }}>Nästa belöning efter {needed} stämplar</Text>
             </View>
-            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>{start}/{needed}</Text>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>{reset ? start : needed}/{needed}</Text>
           </View>
           <View style={{ marginTop: 12 }}>
-            <StampRow total={needed} filled={start} tone={t} size={24} />
+            {/* Kortet börjar om: stämplarna lyfter en i taget, överskottet blir kvar */}
+            <StampRow total={needed} filled={needed} tone={t} size={24} exits={exits} />
           </View>
-        </View>
+        </Animated.View>
       </View>
 
       <Pressable onPress={onClose} accessibilityRole="button" style={({ pressed }) => ({ alignSelf: "stretch", height: 56, borderRadius: 28, backgroundColor: t.primary, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}>

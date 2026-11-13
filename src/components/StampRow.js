@@ -7,21 +7,27 @@ import Shape from "./Shape";
 // Stämplar som mjuka "kak"-former: fyllda med bock, tomma i butikens dekorton.
 //   pops      — [{ index, delay }]: stämplar som just kom till och studsar in, i tur
 //               och ordning (två vid dubbelstämpel). popIndex/popDelay = en enda.
+//   exits     — [{ index, delay }]: fyllda stämplar som lyfter och försvinner när
+//               kortet börjar om efter inlösen (den tomma rutan blir kvar).
 //   glowIndex — den sista tomma rutan när bara en stämpel är kvar: lyser och pulserar.
-export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1, popDelay = 250, pops, glowIndex = -1 }) {
+export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1, popDelay = 250, pops, exits, glowIndex = -1 }) {
   const n = Math.max(0, total | 0);
   const list = pops || (popIndex >= 0 ? [{ index: popIndex, delay: popDelay }] : []);
   const popAt = new Map(list.map((p) => [p.index, p.delay]));
+  const exitAt = new Map((exits || []).map((e) => [e.index, e.delay]));
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap }}>
       {Array.from({ length: n }).map((_, i) => (
-        <Stamp key={i} on={i < filled} tone={tone} size={size} pop={popAt.has(i)} popDelay={popAt.get(i) || 0} glow={i === glowIndex && i >= filled} />
+        <Stamp key={i} on={i < filled} tone={tone} size={size}
+          pop={popAt.has(i)} popDelay={popAt.get(i) || 0}
+          exit={exitAt.has(i)} exitDelay={exitAt.get(i) || 0}
+          glow={i === glowIndex && i >= filled} />
       ))}
     </View>
   );
 }
 
-function Stamp({ on, tone, size, pop, popDelay, glow }) {
+function Stamp({ on, tone, size, pop, popDelay, exit, exitDelay, glow }) {
   const p = useRef(new Animated.Value(pop ? 0 : 1)).current;
   const g = useRef(new Animated.Value(0)).current;
 
@@ -32,6 +38,14 @@ function Stamp({ on, tone, size, pop, popDelay, glow }) {
     a.start();
     return () => a.stop();
   }, [pop, popDelay]);
+
+  useEffect(() => {
+    if (!exit) return;
+    p.setValue(1);
+    const a = Animated.timing(p, { toValue: 0, duration: 300, delay: exitDelay, easing: Easing.in(Easing.quad), useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [exit, exitDelay]);
 
   useEffect(() => {
     if (!glow) return;
@@ -66,6 +80,23 @@ function Stamp({ on, tone, size, pop, popDelay, glow }) {
           <Shape kind="sunny8" size={halo} color={T.lime} />
         </Animated.View>
         {empty}
+      </View>
+    );
+  }
+
+  // Kortet börjar om: den fyllda stämpeln lyfter, snurrar och tonar bort från rutan.
+  if (exit) {
+    return (
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ position: "absolute" }}>{empty}</View>
+        <Animated.View style={{
+          opacity: p.interpolate({ inputRange: [0, 0.35, 1], outputRange: [0, 1, 1] }),
+          transform: [
+            { translateY: p.interpolate({ inputRange: [0, 1], outputRange: [-Math.round(size * 0.6), 0] }) },
+            { rotate: p.interpolate({ inputRange: [0, 1], outputRange: ["35deg", "0deg"] }) },
+            { scale: p.interpolate({ inputRange: [0, 0.65, 1], outputRange: [0.3, 1.22, 1] }) },
+          ],
+        }}>{full}</Animated.View>
       </View>
     );
   }

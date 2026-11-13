@@ -29,7 +29,7 @@ Ingen TypeScript, ingen linter, inga tester, ingen CI. Ren JavaScript med inline
 ## Struktur och nyckelfiler
 
 ```
-App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar (Kort/Hjul/Ställen), snackbar, stämpelark
+App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar (Kort/Hjul/Ställen), snackbar, stämpelark; huvudlistan är en Animated.ScrollView vars skrollvärde (native) driver kortbunten
 app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin, deep links
 eas.json                     # EAS-byggprofiler (development/preview/production)
 .eas/workflows/              # Manuella EAS-arbetsflöden: publicera OTA till preview/production (kräver GitHub-koppling i Expo)
@@ -46,6 +46,7 @@ src/
   lib/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
     useNfcStatus.js          # Hook: pollar isSupported/isEnabled varannan sekund
+    useReduceMotion.js       # Hook: "Reducera rörelse"/"Ta bort animationer" på → kortbuntens djup och glansens loop stängs av
     supabase.js              # Supabase-klient + RPC-wrappers (tapToken, saveReward, loadWallet, wheelStatus, spinWheel, claimWheelPrize …)
     wheel.js                 # Dagens hjul: fältgeometri (10 × 36°, vinstfält 0/3/5/8), målrotation, nedräknings- och giltighetstexter
     theme.js                 # K · Expressiv: tokens (T, RADIUS, FONT), FONT_FILES (inbäddad Roboto Flex) + tone(ink) = palett per butik
@@ -54,17 +55,19 @@ src/
     prefs.js                 # Lokala UI-inställningar i AsyncStorage (onboarding-flagga, första stämpeln, hjulets stad)
   components/
     Shape.js                 # En mjuk form i en färg med valfritt innehåll ovanpå (grundbyggstenen i designen)
-    StampRow.js              # Stämpelrad: fyllda "cookies" med bock, tomma i dekorton; nya stämplar studsar in i tur och ordning, sista tomma rutan lyser (present) när en är kvar
-    LoyaltyCard.js           # Stämpelkort med progress, "BELÖNING KLAR"-, "SPARAD BELÖNING"- och "Dubbelstämpel aktiv"-lägen
+    StampRow.js              # Stämpelrad: fyllda "cookies" med bock, tomma i dekorton; nya stämplar studsar in i tur och ordning (pops), stämplar lyfter bort när kortet börjar om (exits), sista tomma rutan lyser (present) när en är kvar
+    LoyaltyCard.js           # Stämpelkort med progress, "BELÖNING KLAR"-, "SPARAD BELÖNING"- och "Dubbelstämpel aktiv"-lägen; belöningskort får glans (Shine). Stämplarna krymper (28→18 px) så att 10–12 stämplar ryms på en rad
+    CardStack.js             # Kortbunten på hemskärmen: korten växer fram underifrån och glider in under nästa kort överst när listan skrollas; glansen följer skrollningen. Förutsätter att hemfliken ligger överst i skrollinnehållet
+    Shine.js                 # Holografisk glans: ljust band med limekant som sveper över belöningskort (loop 5,2 s, native)
     StampSheet.js            # Stämpelögonblicket: stämpeln slår ner (squash, bläckstänk, våg, vibration i takt med nedslaget); dubbelstämpel = två nedslag → "+2" med ×2; första stämpeln någonsin = välkomst + konfetti. Stänger sig själv efter 4,5 s (5,2 s dubbel, 6,5 s första)
     InkSplash.js             # Bläckstänk: partiklar i butikens färg som skjuts ut från mitten (spelas vid montering)
     RadarBadge.js            # Radarvågor som i TapPass-symbolen medan telefonen lyssnar (Android-raden, iOS-knappen under skanning)
     Snackbar.js              # Meddelanden: nätfel (med "Försök igen"), sparad belöning blockerar, okänd stämpel, väntetid, hjulets förlusttext
-    RewardSheet.js           # Inlösen: låst ark (dra för att visa) → 6-siffrig kod → pollar → "Inlöst!" (nätfel ≠ inlöst)
-    CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad: "Visa koden nu" eller "Spara till senare" (+ överskott som följer med)
+    RewardSheet.js           # Inlösen: låst ark (dra för att visa) → 6-siffrig kod → pollar → koden löses upp i partiklar (0,8 s) → "Inlöst!" med bock, stämplarna lyfter och kortet börjar om på överskottet (nätfel ≠ inlöst)
+    CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad: konfetti ur stämpeln + två kanoner från nederhörnen (tung vibration), "Visa koden nu" eller "Spara till senare" (+ överskott som följer med)
     DailyWheel.js            # Fliken Dagens hjul: stadsväljare, snurr, vinstark (välj 1 av 3 ställen), regler, aktiva dubbelstämplar
     WheelGraphic.js          # Själva hjulet (SVG, 10 fält) som roteras med Animated
-    Confetti.js              # Konfetti av designens former
+    Confetti.js              # Konfetti av designens former med fysik (kast, luftmotstånd, fladder, vändningar) uträknad i förväg och spelad på native-tråden; regn uppifrån eller kast från punkter (from)
     AppLinkOnboarding.js     # Välkomstskärm + steg, plattformsgrenad (Android App Links vs iOS Universal Links/skanna)
     BrandMark.js             # TapPass-symbolen (lime-punkt + radarbågar) som vektor
 ```

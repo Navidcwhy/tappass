@@ -1,18 +1,25 @@
 import React from "react";
-import { View, Text, Pressable } from "react-native";
+import { View, Text, Pressable, Dimensions } from "react-native";
 import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { expiryText, isActiveUntil } from "../lib/wheel";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
+import Shine from "./Shine";
 
 const lowerFirst = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : "");
+
+// Stämplarna krymper för butiker med många stämplar så att raden ryms på en rad
+// (kortets innerbredd = skärmen − 16·2 marginal − 20·2 padding, 8 px mellanrum).
+const stampSize = (n) => Math.max(18, Math.min(28, Math.floor((Dimensions.get("window").width - 72 + 8) / Math.max(1, n)) - 8));
 
 // Ett stämpelkort i butikens egen tonpalett.
 //   pågående     — "2 kvar till …" + stämplar
 //   fullt        — BELÖNING KLAR + "Visa kod" (belöningen är inte sparad än)
 //   sparad       — SPARAD BELÖNING + "Visa kod" (stämpling pausad tills inlöst)
-export default function LoyaltyCard({ card, onOpenReward }) {
+// Kort med belöning får en holografisk glans; shineOffset (Animated-nod) låter
+// glansen följa skrollningen och stillShine stänger av loopen (Reducera rörelse).
+export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShine = false }) {
   const c = card;
   const t = toneFor(c.ink);
   const needed = Math.max(1, c.needed || 1);
@@ -53,7 +60,7 @@ export default function LoyaltyCard({ card, onOpenReward }) {
             </Text>
           ) : (
             <View style={{ marginTop: 14 }}>
-              <StampRow total={needed} filled={stamps} tone={t} />
+              <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} />
             </View>
           )}
           <Pressable
@@ -81,10 +88,12 @@ export default function LoyaltyCard({ card, onOpenReward }) {
           )}
           <View style={{ marginTop: 12 }}>
             {/* Sista rutan lyser när bara en stämpel är kvar */}
-            <StampRow total={needed} filled={stamps} tone={t} glowIndex={left === 1 ? stamps : -1} />
+            <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} glowIndex={left === 1 ? stamps : -1} />
           </View>
         </View>
       )}
+
+      {reward && <Shine offset={shineOffset} still={stillShine} />}
     </View>
   );
 }

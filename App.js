@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, ScrollView, StatusBar, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
+import { View, Text, Pressable, ScrollView, Animated, StatusBar, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -14,7 +14,7 @@ import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus } from "./src/
 import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
-import LoyaltyCard from "./src/components/LoyaltyCard";
+import CardStack from "./src/components/CardStack";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -92,6 +92,10 @@ export default function App() {
   const [allCafes, setAllCafes] = useState([]);  // for places tab + simulate
   const [tab, setTab] = useState("home");
   const [filter, setFilter] = useState("all");   // all | ready
+  // Huvudlistans skrollning driver kortbuntens djup och glans (native-tråden).
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const onScroll = useMemo(() => Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true }), [scrollY]);
+  const [listH, setListH] = useState(0);
   const [rewardId, setRewardId] = useState(null);
   const [celebrationId, setCelebrationId] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -407,10 +411,13 @@ export default function App() {
           loading={loadingAction}
         />
 
-        <ScrollView
+        <Animated.ScrollView
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 16, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
+          onScroll={onScroll}
+          scrollEventThrottle={16}
+          onLayout={(e) => setListH(e.nativeEvent.layout.height)}
           refreshControl={<RefreshControl refreshing={false} onRefresh={tab === "wheel" ? loadWheel : refreshWallet} tintColor={T.inkMute} colors={[T.primary]} />}
         >
           {tab === "home" ? (
@@ -424,6 +431,8 @@ export default function App() {
               onFindPlaces={() => setTab("discover")}
               onSimulate={simulateStamp}
               cafes={allCafes}
+              scrollY={scrollY}
+              listH={listH}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -439,7 +448,7 @@ export default function App() {
           ) : (
             <PlacesTab cafes={allCafes} wallet={wallet} />
           )}
-        </ScrollView>
+        </Animated.ScrollView>
 
         <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}>
           {tab === "home" && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
@@ -485,7 +494,7 @@ function Chip({ label, selected, onPress }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -501,9 +510,7 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
         <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
         {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
       </View>
-      <View style={{ gap: 12, marginTop: 16 }}>
-        {shown.map((c) => <LoyaltyCard key={c.slug} card={c} onOpenReward={onOpenReward} />)}
-      </View>
+      <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} />
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
     </View>
   );
