@@ -2,6 +2,7 @@ import React, { memo, useCallback, useMemo, useState } from "react";
 import { Animated, View } from "react-native";
 import LoyaltyCard from "./LoyaltyCard";
 import useReduceMotion from "../lib/useReduceMotion";
+import { quietNow } from "../lib/quiet";
 
 // Kortbunten på hemskärmen. Korten får djup när listan skrollas:
 //   in underifrån — kortet växer upp från 92 % och tonar fram när det kommer in i bild
@@ -12,8 +13,9 @@ import useReduceMotion from "../lib/useReduceMotion";
 // står korten still.
 //   scrollY — huvudlistans Animated-värde (contentOffset.y)
 //   viewH   — huvudlistans synliga höjd
+//   quietKey — ändras när någon butiks lugna timme börjar eller slutar (App)
 // Förutsätter att hemfliken ligger överst i skrollinnehållet (listans y = innehållets y).
-export default function CardStack({ cards, onOpenReward, scrollY, viewH }) {
+export default function CardStack({ cards, onOpenReward, scrollY, viewH, quietKey }) {
   const reduce = useReduceMotion();
   const [top, setTop] = useState(null);   // listans läge i skrollinnehållet
   const [rows, setRows] = useState({});   // slug → { y, h } inom listan
@@ -30,7 +32,7 @@ export default function CardStack({ cards, onOpenReward, scrollY, viewH }) {
         const live = !!(scrollY && viewH > 0 && top != null && r);
         return (
           <StackRow key={c.slug} card={c} onOpenReward={onOpenReward} onRowLayout={onRowLayout}
-            scrollY={scrollY} viewH={viewH} reduce={reduce}
+            scrollY={scrollY} viewH={viewH} reduce={reduce} quiet={quietKey ? quietNow(c.quietHours) : null}
             y0={live ? top + r.y : null} h={live ? r.h : 0} />
         );
       })}
@@ -40,7 +42,7 @@ export default function CardStack({ cards, onOpenReward, scrollY, viewH }) {
 
 // Ett kort i bunten. Memo: appen ritar om ofta (NFC-status, snackbar) och nya
 // Animated-noder vid varje omritning skulle kopplas om på native-sidan i onödan.
-const StackRow = memo(function StackRow({ card, onOpenReward, onRowLayout, scrollY, viewH, reduce, y0, h }) {
+const StackRow = memo(function StackRow({ card, onOpenReward, onRowLayout, scrollY, viewH, reduce, quiet, y0, h }) {
   const reward = !!card.pendingReward || card.stamps >= card.needed;
   const motion = useMemo(
     () => (y0 != null && !reduce ? depth(scrollY, y0, h, viewH) : null),
@@ -54,7 +56,7 @@ const StackRow = memo(function StackRow({ card, onOpenReward, onRowLayout, scrol
   );
   return (
     <Animated.View onLayout={(e) => onRowLayout(card.slug, e)} style={motion}>
-      <LoyaltyCard card={card} onOpenReward={onOpenReward} shineOffset={shine} stillShine={reduce} />
+      <LoyaltyCard card={card} onOpenReward={onOpenReward} shineOffset={shine} stillShine={reduce} quiet={quiet} />
     </Animated.View>
   );
 });

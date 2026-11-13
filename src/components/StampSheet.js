@@ -21,6 +21,7 @@ const HIT_2 = REDROP_AT + 240;
 // litet tryck (squash), bläckstänk i butikens färg, en våg och en vibration.
 //   card.added === 2 → dubbelstämpel: två nedslag, "+1" blir "+2" med limegnistor
 //   card.first       → kundens första stämpel någonsin: välkomsttext + konfetti
+//   card.quiet       → dubbelstämpeln kom från butikens lugna timme (v8)
 // Stängs av App efter några sekunder.
 export default function StampSheet({ card, onClose }) {
   const insets = useSafeAreaInsets();
@@ -97,11 +98,13 @@ export default function StampSheet({ card, onClose }) {
         }}>
           <View style={{ width: 32, height: 4, borderRadius: 2, backgroundColor: T.outline }} />
 
-          {card.first && (
-            <Text style={{ marginTop: 16, fontFamily: FONT.bold, fontSize: 12, letterSpacing: 0.96, color: t.primary }}>VÄLKOMMEN TILL TAPPASS</Text>
+          {(card.first || card.quiet) && (
+            <Text style={{ marginTop: 16, fontFamily: FONT.bold, fontSize: 12, letterSpacing: 0.96, color: card.first ? t.primary : T.onTertiaryContainer }}>
+              {card.first ? "VÄLKOMMEN TILL TAPPASS" : "LUGN TIMME · 2 STÄMPLAR"}
+            </Text>
           )}
 
-          <View style={{ width: 200, height: 160, marginTop: card.first ? 6 : 18, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ width: 200, height: 160, marginTop: card.first || card.quiet ? 6 : 18, alignItems: "center", justifyContent: "center" }}>
             <Shape kind="sunny8" size={30} color={t.container} style={{ position: "absolute", left: 6, top: 18 }} />
             <Shape kind="cookie9" size={22} color={t.deco} style={{ position: "absolute", right: 16, top: 8 }} />
             <Shape kind="cookie9" size={16} color={t.primary} style={{ position: "absolute", right: 22, bottom: 10 }} />
