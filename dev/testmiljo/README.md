@@ -27,3 +27,21 @@ node dev/testmiljo/serve.js "$PWD/webdist" &     # http://localhost:8099
 node dev/testmiljo/rec3.js vid 'a=/t/miyabi-01?s=quiet&d=2600&now=2026-11-16T14:20@8'
 cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs
 ```
+
+## Butikspanelen (tappass.se/m, Lovable) — `panel/`
+Sandlådan når inte lovable.app eller tappass.se, så panelens riktiga kod körs lokalt i Vite
+och Playwright svarar på alla RPC-anrop (`mock.cjs`) — ingen trafik når produktion.
+- `extract-lovable.py` — plockar ut `m.tsx`, `i18n.tsx`, `styles.css` och `merchant-supabase.ts`
+  ur en Lovable-diff mot git:s tomma träd (svaret från `get_diff` sparas som fil eftersom det är stort).
+- `shim/router.js` — ersätter TanStack Router (`Route.component` = sidan).
+- `check.cjs` — funktionstest av "Lugna timmar" (43 kontroller: spara, validering, polling med
+  falsk klocka, bad_session, läsfel, engelska, 360 px). `rec-panel.cjs` — video (768×1024 @2x).
+
+```bash
+cd dev/testmiljo/panel && npm ci
+# get_diff(project_id, sha=<commit>, base_sha="4b825dc642cb6eb9a060e54bf8d69288fbee4904") → sparad fil
+python3 extract-lovable.py <sparad-diff-fil> .
+# + read_file src/assets/brand/tappass-wordmark.svg → src/assets/brand/tappass-wordmark.svg
+npx vite --port 5174 --strictPort --host 127.0.0.1 &
+node check.cjs && node rec-panel.cjs vid
+```

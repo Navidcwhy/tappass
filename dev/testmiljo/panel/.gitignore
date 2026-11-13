@@ -1,0 +1,9 @@
+node_modules/
+vid/
+vite.log
+npm.log
+# Lovables källkod hämtas varje gång (extract-lovable.py + read_file), checkas inte in här
+src/routes/
+src/lib/
+src/assets/
+src/styles.css

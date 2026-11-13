@@ -1,0 +1,15 @@
+import "@fontsource/fraunces/400.css";
+import "@fontsource/fraunces/500.css";
+import "@fontsource/schibsted-grotesk/400.css";
+import "@fontsource/schibsted-grotesk/500.css";
+import "@fontsource/schibsted-grotesk/600.css";
+import "@fontsource/schibsted-grotesk/700.css";
+import "@fontsource/space-mono/400.css";
+import "@fontsource/space-mono/700.css";
+import "./styles.css";
+import { createRoot } from "react-dom/client";
+import { Route } from "./routes/m";
+import { LanguageProvider } from "./lib/i18n";
+const lang = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "sv";
+const Page = Route.component;
+createRoot(document.getElementById("root")).render(<LanguageProvider value={lang}><Page /></LanguageProvider>);

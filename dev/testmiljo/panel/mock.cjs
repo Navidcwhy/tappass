@@ -1,0 +1,71 @@
+// Fejkade svar för butikspanelens RPC:er (Supabase). Ingen trafik når produktion.
+//   mock(page, { quiet, failQuiet, badSession, log })
+const DAY = 86400000;
+function daily() {
+  const out = [];
+  const today = new Date("2026-11-14T12:00:00Z");
+  const base = [3, 5, 4, 6, 2, 7, 8, 4, 5, 6, 3, 4, 9, 7, 5, 4, 6, 5, 3, 8, 6, 7, 4, 5, 6, 9, 7, 5, 6, 6];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today.getTime() - i * DAY);
+    out.push({ day: d.toISOString().slice(0, 10), stamps: base[29 - i] });
+  }
+  return out;
+}
+function clean(hours) {
+  if (!Array.isArray(hours) || hours.length > 7) return null;
+  const out = [];
+  for (const h of hours) {
+    if (!h || !Array.isArray(h.days) || !h.days.length) return null;
+    if (!h.days.every((d) => Number.isInteger(d) && d >= 1 && d <= 7)) return null;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(h.from || "") || !/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/.test(h.to || "")) return null;
+    if (h.from >= h.to) return null;
+    out.push({ days: [...new Set(h.days)].sort((a, b) => a - b), from: h.from, to: h.to });
+  }
+  return out;
+}
+async function mock(page, opts = {}) {
+  const state = {
+    quiet: opts.quiet ?? [{ days: [1, 2, 3, 4, 5], from: "14:00", to: "16:00" }],
+    active: opts.active ?? true,
+    visits30: opts.visits30 ?? 18,
+    visitsTotal: opts.visitsTotal ?? 46,
+    failQuiet: !!opts.failQuiet,
+    badSession: !!opts.badSession,
+    calls: [],
+  };
+  await page.route("**/rest/v1/rpc/**", async (route) => {
+    const fn = route.request().url().split("/rpc/")[1].split("?")[0];
+    let body = {};
+    try { body = route.request().postDataJSON() || {}; } catch {}
+    state.calls.push({ fn, body });
+    if (opts.log) opts.log(fn, body);
+    const json = (data, delay = 120) => new Promise((r) => setTimeout(r, delay)).then(() =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) }));
+    if (state.badSession && fn !== "merchant_logout") return json({ ok: false, error: "bad_session" });
+    if (opts.badQuietOnly && /quiet_hours/.test(fn)) return json({ ok: false, error: "bad_session" });
+    switch (fn) {
+      case "merchant_stats": return json({ ok: true, today: 6, week: 31, month: 118, total: 412, pending: 1 });
+      case "merchant_daily": return json({ ok: true, days: daily() });
+      case "merchant_pending_list":
+        return json({ ok: true, pending: [{ code: "482913", saved_at: new Date(Date.now() - 25 * 60000).toISOString(), customer_label: "Kund #A41F" }] });
+      case "merchant_campaign_stats":
+        return json({ ok: true, bonus_stamps_30d: 4, bonus_stamps_total: 4, active_bonuses: 1, new_customers_30d: 2, carried_over_30d: 1 });
+      case "merchant_get_settings":
+        return json({ ok: true, stamp_cooldown_seconds: 60, cooldown_min_seconds: 10, cooldown_max_seconds: 86400, login_name: "miyabi" });
+      case "merchant_get_quiet_hours":
+        if (state.failQuiet) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "fel" }) });
+        return json({ ok: true, quiet_hours: state.quiet, active_now: state.quiet.length ? state.active : false,
+          visits_30d: state.visits30, visits_total: state.visitsTotal });
+      case "merchant_set_quiet_hours": {
+        const c = clean(body.p_hours);
+        if (!c) return json({ ok: false, error: "invalid_quiet_hours", max_periods: 7 }, 350);
+        state.quiet = c;
+        return json({ ok: true, quiet_hours: c, active_now: c.length ? state.active : false }, 450);
+      }
+      case "merchant_logout": return json({ ok: true });
+      default: return json({ ok: false, error: "unknown_fn_" + fn });
+    }
+  });
+  return state;
+}
+module.exports = { mock };
