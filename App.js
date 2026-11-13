@@ -19,6 +19,7 @@ import SeasonFall from "./src/components/SeasonFall";
 import Confetti from "./src/components/Confetti";
 import useReduceMotion from "./src/lib/useReduceMotion";
 import { seasonFor } from "./src/lib/season";
+import { quietNow, quietParts, quietSummary } from "./src/lib/quiet";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -47,6 +48,7 @@ function normalizeCafe(c) {
     reward: c.reward_text,
     rewardShort: c.reward_short,
     needed: c.stamps_needed,
+    quietHours: Array.isArray(c.quiet_hours) ? c.quiet_hours : [],   // v8: lugna timmar
   };
 }
 
@@ -233,6 +235,21 @@ export default function App() {
     return () => clearInterval(id);
   }, [wheel, loadWheel]);
 
+  // Lugna timmar: rita om när någon butiks lugna timme börjar eller slutar
+  // (kontroll var 30:e sekund; nyckeln ändras bara när läget skiftar).
+  const [quietKey, setQuietKey] = useState("");
+  useEffect(() => {
+    const check = () => {
+      const key = [...Object.values(wallet), ...allCafes]
+        .filter((c) => c && quietNow(c.quietHours)).map((c) => c.slug)
+        .filter((s, i, a) => a.indexOf(s) === i).sort().join(",");
+      setQuietKey((prev) => (prev === key ? prev : key));
+    };
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, [wallet, allCafes]);
+
   // Ett meddelande i taget; ett nytt ersätter det gamla och får full visningstid.
   const toastTimer = useRef(null);
   const showToast = useCallback((t, ms) => {
@@ -314,7 +331,7 @@ export default function App() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
-      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1, first });
+      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1, first, quiet: !!result.quiet_applied });
     }
   }, [showToast, showStamp, loadWheel]);
 
@@ -444,6 +461,7 @@ export default function App() {
               scrollY={scrollY}
               listH={listH}
               season={season}
+              quietKey={quietKey}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -457,7 +475,7 @@ export default function App() {
               onCloseRules={() => setRulesOpen(false)}
             />
           ) : (
-            <PlacesTab cafes={allCafes} wallet={wallet} />
+            <PlacesTab cafes={allCafes} wallet={wallet} quietKey={quietKey} />
           )}
         </Animated.ScrollView>
 
@@ -524,7 +542,7 @@ function SeasonChip({ season }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -541,7 +559,7 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
         {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
         {!!(season && season.greeting) && <SeasonChip season={season} />}
       </View>
-      <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} />
+      <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} quietKey={quietKey} />
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
     </View>
   );
@@ -588,7 +606,7 @@ function DevSimulate({ cafes, onSimulate }) {
   );
 }
 
-function PlacesTab({ cafes, wallet }) {
+function PlacesTab({ cafes, wallet, quietKey }) {
   const [q, setQ] = useState("");
   const [type, setType] = useState(null);
   const types = useMemo(
@@ -638,7 +656,7 @@ function PlacesTab({ cafes, wallet }) {
       </Text>
 
       <View style={{ gap: 10 }}>
-        {list.map((c) => <PlaceCard key={c.slug} cafe={c} card={wallet[c.slug]} />)}
+        {list.map((c) => <PlaceCard key={c.slug} cafe={c} card={wallet[c.slug]} quiet={quietKey ? quietNow(c.quietHours) : null} />)}
       </View>
 
       {list.length === 0 && cafes.length > 0 && (
@@ -663,7 +681,7 @@ function PlacesTab({ cafes, wallet }) {
   );
 }
 
-function PlaceCard({ cafe, card }) {
+function PlaceCard({ cafe, card, quiet }) {
   const t = toneFor(cafe.ink);
   const meta = [cafe.type, cafe.area].filter(Boolean).join(" · ");
   const needed = cafe.needed || card?.needed || 0;
@@ -671,6 +689,8 @@ function PlaceCard({ cafe, card }) {
     ? (card.pendingReward || card.stamps >= card.needed ? "Klar" : card.stamps + "/" + card.needed)
     : null;
   const bonusOn = !!card && isActiveUntil(card.bonusExpiresAt);
+  const schedule = quietSummary(cafe.quietHours);
+  const periods = quietParts(cafe.quietHours);
   return (
     <View style={{ padding: 16, borderRadius: 24, backgroundColor: t.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
       <Shape kind="cookie9" size={52} color={t.primary}>
@@ -685,8 +705,19 @@ function PlaceCard({ cafe, card }) {
             {cafe.rewardShort || cafe.reward}{needed ? " efter " + needed + " stämplar" : ""}
           </Text>
         </View>
+        {!!schedule && (
+          <View accessible accessibilityLabel={"Lugna timmar " + schedule + ": varje stämpel ger 2"} style={{ marginTop: 4, flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
+            <Icon name="timer" size={16} color={t.onContainer} />
+            {/* Varje del bryts hel, så att "14–16" aldrig delas mellan raderna */}
+            <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", columnGap: 4 }}>
+              {["Dubbla stämplar", ...periods].map((p, i) => (
+                <Text key={i} style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: t.muted }}>{p + (i > 0 && i < periods.length ? " ·" : "")}</Text>
+              ))}
+            </View>
+          </View>
+        )}
       </View>
-      {(!!progress || bonusOn) && (
+      {(!!progress || bonusOn || !!quiet) && (
         <View style={{ alignSelf: "flex-start", alignItems: "flex-end", gap: 6 }}>
           {!!progress && (
             <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: t.primary }}>
@@ -696,6 +727,11 @@ function PlaceCard({ cafe, card }) {
           {bonusOn && (
             <View accessibilityLabel="Dubbelstämpel aktiv" style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: T.lime }}>
               <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: T.onPrimaryContainer }}>×2</Text>
+            </View>
+          )}
+          {!!quiet && (
+            <View accessibilityLabel="Lugn timme just nu: varje stämpel ger 2" style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: T.tertiaryContainer }}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 13, color: T.onTertiaryContainer }}>×2 nu</Text>
             </View>
           )}
         </View>

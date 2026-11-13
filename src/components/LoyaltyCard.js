@@ -3,6 +3,7 @@ import { View, Text, Pressable, Dimensions } from "react-native";
 import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { expiryText, isActiveUntil } from "../lib/wheel";
+import { clockText } from "../lib/quiet";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 import Shine from "./Shine";
@@ -19,7 +20,8 @@ const stampSize = (n) => Math.max(18, Math.min(28, Math.floor((Dimensions.get("w
 //   sparad       — SPARAD BELÖNING + "Visa kod" (stämpling pausad tills inlöst)
 // Kort med belöning får en holografisk glans; shineOffset (Animated-nod) låter
 // glansen följa skrollningen och stillShine stänger av loopen (Reducera rörelse).
-export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShine = false }) {
+// quiet = butikens lugna timme som gäller just nu ({ from, to }) → "Lugn timme just nu".
+export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShine = false, quiet = null }) {
   const c = card;
   const t = toneFor(c.ink);
   const needed = Math.max(1, c.needed || 1);
@@ -46,6 +48,7 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
         {!reward && <Text style={{ fontFamily: FONT.bold, fontSize: 16, color: t.primary }}>{stamps}/{needed}</Text>}
       </View>
 
+      {!pending && !!quiet && <QuietBanner until={clockText(quiet.to)} />}
       {!pending && isActiveUntil(c.bonusExpiresAt) && <BonusBanner expiresAt={c.bonusExpiresAt} />}
 
       {reward ? (
@@ -94,6 +97,22 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
       )}
 
       {reward && <Shine offset={shineOffset} still={stillShine} />}
+    </View>
+  );
+}
+
+// Lugna timmar: butiken ger 2 stämplar per besök just nu.
+function QuietBanner({ until }) {
+  const end = until === "24" ? "midnatt" : until.includes(".") ? until : until + ".00";   // "16.00", "16.30"
+  return (
+    <View accessibilityLabel={"Lugn timme just nu. Varje stämpel här ger 2 till " + end} style={{ marginTop: 16, paddingVertical: 10, paddingLeft: 10, paddingRight: 14, borderRadius: 16, backgroundColor: T.tertiaryContainer, flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <Shape kind="burst12" size={40} color={T.onTertiaryContainer}>
+        <Text style={{ fontFamily: FONT.display, fontSize: 14, color: "#FFFFFF" }}>×2</Text>
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.bold, fontSize: 15, lineHeight: 20, color: T.onTertiaryContainer }}>Lugn timme just nu</Text>
+        <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: T.onTertiaryContainer }}>Varje stämpel här ger 2 · till {end}</Text>
+      </View>
     </View>
   );
 }
