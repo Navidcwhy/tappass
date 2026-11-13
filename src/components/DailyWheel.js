@@ -6,13 +6,14 @@ import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { spinWheel, claimWheelPrize } from "../lib/supabase";
 import { getWheelCity, setWheelCity } from "../lib/prefs";
-import { restRotation, targetRotation, countdownText, expiryText, pickCity, availableIn } from "../lib/wheel";
+import { restRotation, targetRotation, tickTimes, countdownText, expiryText, pickCity, availableIn } from "../lib/wheel";
 import WheelGraphic from "./WheelGraphic";
 import Shape from "./Shape";
 import Confetti from "./Confetti";
 
 const TERMS_URL = "https://tappass.se/anvandarvillkor";
 const SPIN_MS = 4200;
+const REVEAL_MS = 1400;   // vinst: strålar och lysande fält innan vinstarket öppnas
 const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
 // Fliken "Dagens hjul". Servern avgör allt (utfall, ett snurr per dag, nästa
@@ -30,12 +31,15 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, onCit
   const [spinning, setSpinning] = useState(false);
   const [win, setWin] = useState(null);          // { spinId, offers, claimUntil }
   const [now, setNow] = useState(Date.now());
+  const [glow, setGlow] = useState(-1);          // vinstfältet som lyser
+  const timers = useRef([]);
+  const later = (fn, ms) => { timers.current.push(setTimeout(fn, ms)); };
 
   useEffect(() => {
     mounted.current = true;
     getWheelCity().then((c) => { if (mounted.current) setCity(c); });
     if (onReload) onReload();
-    return () => { mounted.current = false; };
+    return () => { mounted.current = false; timers.current.forEach(clearTimeout); };
   }, []);
 
   const ok = !!status && status.ok === true;
@@ -107,19 +111,38 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, onCit
       }
       return;
     }
-    const target = targetRotation(rotRef.current, res.segment, { jitter: Math.random() * 20 - 10 });
+    const from = rotRef.current;
+    const target = targetRotation(from, res.segment, { jitter: Math.random() * 20 - 10 });
+    // En lätt tick-vibration per fält som passerar pekaren, i takt med inbromsningen.
+    tickTimes(from, target, SPIN_MS).forEach((ms) => later(() => Haptics.selectionAsync(), ms));
     Animated.timing(rotation, { toValue: target, duration: SPIN_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
       rotRef.current = target;
       spunIdRef.current = res.spin_id || "spun";
       if (!mounted.current) { if (onReload) onReload(); return; }
-      setSpinning(false);
       if (onReload) onReload();
       if (res.won) {
+        // Vinst: fältet lyser och strålar växer fram bakom hjulet, sedan vinstarket.
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setWin({ spinId: res.spin_id, offers: res.offers || [], claimUntil: res.claim_until });
+        setGlow(res.segment);
+        later(() => {
+          if (!mounted.current) return;
+          setSpinning(false);
+          setWin({ spinId: res.spin_id, offers: res.offers || [], claimUntil: res.claim_until });
+        }, REVEAL_MS);
+        later(() => { if (mounted.current) setGlow(-1); }, REVEAL_MS + 500);   // när arket täcker hjulet
       } else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onToast({ type: "wheel-miss", text: "Tyvärr ingen vinst. Försök igen om " + countdownText(res.next_spin_at) + "." }, 3000);
+        // Förlust: hjulet vickar tillbaka lite och stannar, som om det nästan nådde nästa fält.
+        Animated.sequence([
+          Animated.timing(rotation, { toValue: target - 5, duration: 140, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+          Animated.timing(rotation, { toValue: target + 2.5, duration: 160, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(rotation, { toValue: target - 1, duration: 130, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(rotation, { toValue: target, duration: 110, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        ]).start(() => {
+          if (!mounted.current) return;
+          setSpinning(false);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onToast({ type: "wheel-miss", text: "Tyvärr ingen vinst. Försök igen om " + countdownText(res.next_spin_at) + "." }, 3000);
+        });
       }
     });
   };
@@ -170,7 +193,7 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, onCit
           <CityBox city={cityName} disabled={spinning} onPress={() => setPicker(true)} />
 
           <View style={{ alignItems: "center", marginTop: 30 }}>
-            <WheelGraphic size={size} rotation={rotation} />
+            <WheelGraphic size={size} rotation={rotation} glow={glow} celebrate={glow >= 0} />
           </View>
 
           {spinning ? (
@@ -192,7 +215,7 @@ export default function DailyWheel({ status, onReload, onToast, onClaimed, onCit
         </>
       )}
 
-      {prize && !win && (
+      {prize && !win && !spinning && (
         <PrizeBanner
           prize={prize}
           now={now}
@@ -249,7 +272,7 @@ function CityBox({ city, onPress, disabled }) {
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={city ? "Stad: " + city + ". Byt stad" : "Välj stad"}
-      style={({ pressed }) => ({ marginTop: 14, height: 56, borderRadius: 28, borderWidth: 1, borderColor: T.outline, backgroundColor: T.surface, paddingLeft: 14, paddingRight: 16, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.85 : 1 })}
+      style={({ pressed }) => ({ zIndex: 1, marginTop: 14, height: 56, borderRadius: 28, borderWidth: 1, borderColor: T.outline, backgroundColor: T.surface, paddingLeft: 14, paddingRight: 16, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.85 : 1 })}
     >
       <Icon name="pin" size={22} color={T.primary} />
       <View style={{ flex: 1 }}>

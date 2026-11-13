@@ -23,6 +23,21 @@ export function targetRotation(current, segment, { turns = 6, jitter = 0 } = {})
   return current + turns * 360 + delta;
 }
 
+// Tidpunkter (ms från start) då en fältgräns passerar pekaren under ett snurr
+// från `from` till `to` grader med Easing.out(Easing.cubic) — en tick (vibration)
+// per fält. Ticks tätare än minGap hoppas över: vibratorn hinner inte med fler.
+export function tickTimes(from, to, duration, minGap = 55) {
+  const out = [];
+  if (!(to > from) || !(duration > 0)) return out;
+  let last = -Infinity;
+  for (let k = Math.floor(from / SEGMENT_DEG) + 1; k * SEGMENT_DEG <= to; k++) {
+    const u = (k * SEGMENT_DEG - from) / (to - from);   // andel av sträckan
+    const t = (1 - Math.cbrt(1 - u)) * duration;       // invers av 1 − (1 − t)³
+    if (t - last >= minGap) { out.push(Math.round(t)); last = t; }
+  }
+  return out;
+}
+
 // Vilket fält pekaren står på vid en viss rotation (för test och tillgänglighet).
 export function segmentAt(rotation) {
   const a = mod(-rotation, 360);                    // vinkeln på hjulet som står under pekaren
