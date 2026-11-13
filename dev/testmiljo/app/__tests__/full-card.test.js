@@ -26,7 +26,7 @@ const layout = (node, l) => act(async () => { node.props.onLayout({ nativeEvent:
 const pieces = (tree) => tree.root.findAll((n) => n.type === "View" && n.props.style && Array.isArray(n.props.style.transform) && n.props.style.transform.some((t) => t.scaleX !== undefined)).length;
 
 test("inlösen: koden löses upp först, sedan Inlöst! med fullt kort som börjar om", async () => {
-  sb.getCurrentSavedCode.mockResolvedValueOnce({ ok: true, code: "482917" }).mockResolvedValue({ ok: true, code: null });
+  sb.getCurrentSavedCode.mockResolvedValueOnce({ ok: true, code: "305174" }).mockResolvedValue({ ok: true, code: null });
   const tree = await mount(<RewardSheet visible card={{ ...card, stamps: 7, pendingReward: true }} onClose={() => {}} onRedeemed={() => {}} />);
   await until(() => sb.getCurrentSavedCode.mock.calls.length >= 2, "pollning");
   await flush();
@@ -44,7 +44,7 @@ test("inlösen: koden löses upp först, sedan Inlöst! med fullt kort som börj
 });
 
 test("koden visas siffra för siffra med hela koden som skärmläsartext", async () => {
-  sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: "482917" });
+  sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: "305174" });
   const tree = await mount(<RewardSheet visible card={{ ...card, stamps: 6, pendingReward: true }} onClose={() => {}} onRedeemed={() => {}} />);
   await until(() => text(tree).includes("DIN KOD"), "kod");
   expect(tree.root.findAll((n) => n.props.accessibilityLabel === "Kod 4 8 2 9 1 7").length).toBeGreaterThan(0);

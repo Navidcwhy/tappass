@@ -27,9 +27,9 @@ export async function tapToken() {
   if (S === "quiet") return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 2, bonus_applied: false, quiet_applied: true, carry_over: 0 };
   return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 2, bonus_applied: true, carry_over: 0 };
 }
-export const saveReward = async () => ({ ok: true, code: "482917" });
+export const saveReward = async () => ({ ok: true, code: "305174" });
 let codeCalls = 0;
-export const getCurrentSavedCode = async () => { codeCalls++; return S === "redeem" && codeCalls > 2 ? { ok: true, code: null } : { ok: true, code: "482917" }; };
+export const getCurrentSavedCode = async () => { codeCalls++; return S === "redeem" && codeCalls > 2 ? { ok: true, code: null } : { ok: true, code: "305174" }; };
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
