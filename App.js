@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, ScrollView, StatusBar, Animated, Easing, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
+import { View, Text, Pressable, ScrollView, StatusBar, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -11,7 +11,7 @@ import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
 import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus } from "./src/lib/supabase";
-import { hasOnboarded, markOnboarded, getWheelCity } from "./src/lib/prefs";
+import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
 import LoyaltyCard from "./src/components/LoyaltyCard";
@@ -22,6 +22,7 @@ import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
 import Shape from "./src/components/Shape";
 import DailyWheel from "./src/components/DailyWheel";
+import RadarBadge from "./src/components/RadarBadge";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -104,6 +105,9 @@ export default function App() {
   const [bottomH, setBottomH] = useState(96);
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
+  // Första stämpeln någonsin på telefonen (välkomstfirande). true tills flaggan lästs,
+  // så att ett tidigt tapp aldrig ger ett felaktigt "första".
+  const firstStampDoneRef = useRef(true);
 
   const nfc = useNfcStatus();
 
@@ -157,6 +161,7 @@ export default function App() {
       // Show the intro only on the first launch, not on every start.
       // Independent of the network so a slow backend can't delay or swallow it.
       hasOnboarded().then((done) => { if (!done) setTimeout(() => setShowOnboarding(true), 1500); });
+      hasFirstStamp().then((done) => { firstStampDoneRef.current = done; });
       getWheelCity().then((c) => { if (c) setWheelCityState(c); }).catch(() => {});
 
       // Background refresh. null = request failed -> keep cached state.
@@ -231,7 +236,9 @@ export default function App() {
   const showStamp = useCallback((card) => {
     if (stampTimer.current) clearTimeout(stampTimer.current);
     setStampCard(card);
-    stampTimer.current = setTimeout(() => { stampTimer.current = null; setStampCard(null); }, 4500);
+    // Längre visning när mer händer: välkomstfirandet och dubbelstämpelns två nedslag.
+    const ms = card.first ? 6500 : card.added === 2 ? 5200 : 4500;
+    stampTimer.current = setTimeout(() => { stampTimer.current = null; setStampCard(null); }, ms);
   }, []);
 
   const lastFailedTokenRef = useRef(null);
@@ -279,6 +286,9 @@ export default function App() {
     }
 
     lastFailedTokenRef.current = null;
+    // Första stämpeln någonsin: inga kort på telefonen och flaggan inte satt.
+    const first = !firstStampDoneRef.current && Object.keys(walletRef.current).length === 0;
+    if (!firstStampDoneRef.current) { firstStampDoneRef.current = true; markFirstStamp(); }
     // En lyckad stämpel förbrukar alltid en aktiv dubbelstämpel hos butiken.
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
     setWallet((prev) => ({ ...prev, [card.slug]: card }));
@@ -289,8 +299,8 @@ export default function App() {
       setTimeout(() => setCelebrationId(card.slug), 700);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
-      Haptics.impactAsync(result.bonus_applied ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Medium);
-      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1 });
+      // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
+      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1, first });
     }
   }, [showToast, showStamp, loadWheel]);
 
@@ -736,31 +746,10 @@ function AndroidScanner({ nfc, onSendTap }) {
 
   return (
     <View style={{ marginHorizontal: 16, marginBottom: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 20, backgroundColor: T.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
-      <ListeningBadge active={!!nfc.enabled && !unsupported} busy={checking} />
+      <RadarBadge size={40} active={!!nfc.enabled && !unsupported} busy={checking} />
       <View style={{ flex: 1 }}>
         <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.ink }}>{title}</Text>
         {!!text && <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: err ? T.errorText : T.inkSoft }}>{text}</Text>}
-      </View>
-    </View>
-  );
-}
-
-// NFC-ikonen i en cirkel med en lugn puls medan telefonen lyssnar.
-function ListeningBadge({ active, busy }) {
-  const pulse = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (!active) { pulse.stopAnimation(); pulse.setValue(0); return; }
-    const anim = Animated.loop(Animated.timing(pulse, { toValue: 1, duration: 1800, easing: Easing.out(Easing.quad), useNativeDriver: true }));
-    anim.start();
-    return () => anim.stop();
-  }, [active]);
-  return (
-    <View style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
-      {active && (
-        <Animated.View style={{ position: "absolute", width: 40, height: 40, borderRadius: 20, backgroundColor: T.primaryContainer, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }] }} />
-      )}
-      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: T.primaryContainer, alignItems: "center", justifyContent: "center" }}>
-        {busy ? <ActivityIndicator size="small" color={T.onPrimaryContainer} /> : <Icon name="nfc" size={20} color={T.onPrimaryContainer} />}
       </View>
     </View>
   );
@@ -817,7 +806,7 @@ function IosScanner({ nfc, onSendTap }) {
         style={({ pressed }) => ({ height: 56, paddingLeft: 16, paddingRight: 20, borderRadius: 16, backgroundColor: T.primaryContainer, flexDirection: "row", alignItems: "center", gap: 10, opacity: scanning ? 0.75 : pressed ? 0.88 : 1, shadowColor: "#000", shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 })}
       >
         {scanning
-          ? <ActivityIndicator size="small" color={T.onPrimaryContainer} />
+          ? <RadarBadge size={26} active />
           : <Icon name="nfc" size={22} color={T.onPrimaryContainer} />}
         <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.onPrimaryContainer }}>{scanning ? "Håll mot stämpeln…" : "Skanna stämpel"}</Text>
       </Pressable>

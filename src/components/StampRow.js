@@ -1,40 +1,86 @@
 import React, { useEffect, useRef } from "react";
-import { View, Animated } from "react-native";
-import { Check } from "lucide-react-native";
+import { View, Animated, Easing } from "react-native";
+import { Check, Gift } from "lucide-react-native";
+import { T } from "../lib/theme";
 import Shape from "./Shape";
 
 // Stämplar som mjuka "kak"-former: fyllda med bock, tomma i butikens dekorton.
-// popIndex = stämpeln som just kom till (studsar in och får en solform bakom sig).
-export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1 }) {
+//   pops      — [{ index, delay }]: stämplar som just kom till och studsar in, i tur
+//               och ordning (två vid dubbelstämpel). popIndex/popDelay = en enda.
+//   glowIndex — den sista tomma rutan när bara en stämpel är kvar: lyser och pulserar.
+export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1, popDelay = 250, pops, glowIndex = -1 }) {
   const n = Math.max(0, total | 0);
+  const list = pops || (popIndex >= 0 ? [{ index: popIndex, delay: popDelay }] : []);
+  const popAt = new Map(list.map((p) => [p.index, p.delay]));
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap }}>
       {Array.from({ length: n }).map((_, i) => (
-        <Stamp key={i} on={i < filled} tone={tone} size={size} pop={i === popIndex} />
+        <Stamp key={i} on={i < filled} tone={tone} size={size} pop={popAt.has(i)} popDelay={popAt.get(i) || 0} glow={i === glowIndex && i >= filled} />
       ))}
     </View>
   );
 }
 
-function Stamp({ on, tone, size, pop }) {
-  const scale = useRef(new Animated.Value(pop ? 0.2 : 1)).current;
+function Stamp({ on, tone, size, pop, popDelay, glow }) {
+  const p = useRef(new Animated.Value(pop ? 0 : 1)).current;
+  const g = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     if (!pop) return;
-    Animated.spring(scale, { toValue: 1, friction: 4, tension: 90, delay: 250, useNativeDriver: true }).start();
-  }, [pop]);
+    p.setValue(0);
+    const a = Animated.spring(p, { toValue: 1, friction: 4, tension: 90, delay: popDelay, useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [pop, popDelay]);
 
-  const stamp = (
-    <Shape kind="cookie9" size={size} color={on ? tone.primary : tone.deco}>
-      {on && <Check size={Math.round(size * 0.5)} color="#FFFFFF" strokeWidth={3.5} />}
+  useEffect(() => {
+    if (!glow) return;
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(g, { toValue: 1, duration: 850, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(g, { toValue: 0, duration: 850, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [glow]);
+
+  const empty = (
+    <Shape kind="cookie9" size={size} color={tone.deco}>
+      {glow && <Gift size={Math.round(size * 0.5)} color={tone.primary} strokeWidth={2.4} />}
+    </Shape>
+  );
+  const full = (
+    <Shape kind="cookie9" size={size} color={tone.primary}>
+      <Check size={Math.round(size * 0.5)} color="#FFFFFF" strokeWidth={3.5} />
     </Shape>
   );
 
-  if (!pop) return stamp;
+  if (glow) {
+    const halo = Math.round(size * 1.6);
+    return (
+      <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+        <Animated.View style={{
+          position: "absolute", left: -(halo - size) / 2, top: -(halo - size) / 2,
+          opacity: g.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.95] }),
+          transform: [{ scale: g.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1.08] }) }],
+        }}>
+          <Shape kind="sunny8" size={halo} color={T.lime} />
+        </Animated.View>
+        {empty}
+      </View>
+    );
+  }
+
+  if (!pop) return on ? full : empty;
+
+  // Ny stämpel: den tomma rutan syns först, sedan studsar den fyllda in med en sol bakom.
   const halo = Math.round(size * 1.4);
   return (
     <View style={{ width: halo, height: halo, alignItems: "center", justifyContent: "center", margin: -(halo - size) / 2 }}>
-      <Shape kind="sunny8" size={halo} color={tone.container} style={{ position: "absolute" }} />
-      <Animated.View style={{ transform: [{ scale }] }}>{stamp}</Animated.View>
+      <Animated.View style={{ position: "absolute", opacity: p.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 1] }), transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }] }}>
+        <Shape kind="sunny8" size={halo} color={tone.container} />
+      </Animated.View>
+      <View style={{ position: "absolute" }}>{empty}</View>
+      <Animated.View style={{ transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.2, 1] }) }], opacity: p.interpolate({ inputRange: [0, 0.05, 1], outputRange: [0, 1, 1] }) }}>{full}</Animated.View>
     </View>
   );
 }

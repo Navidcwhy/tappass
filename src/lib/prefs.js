@@ -13,6 +13,19 @@ export async function markOnboarded() {
   catch {}
 }
 
+// Kundens första stämpel någonsin på den här telefonen (välkomstfirandet visas en gång).
+const FIRST_STAMP_KEY = "tappass.firstStamp";
+
+export async function hasFirstStamp() {
+  try { return (await AsyncStorage.getItem(FIRST_STAMP_KEY)) === "1"; }
+  catch { return false; }
+}
+
+export async function markFirstStamp() {
+  try { await AsyncStorage.setItem(FIRST_STAMP_KEY, "1"); }
+  catch {}
+}
+
 // Dagens hjul: vald stad sparas BARA på telefonen (utlovat i integritetspolicyn).
 const CITY_KEY = "tappass.wheel.city";
 
