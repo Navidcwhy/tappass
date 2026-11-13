@@ -29,7 +29,7 @@ Ingen TypeScript, ingen linter, inga tester, ingen CI. Ren JavaScript med inline
 ## Struktur och nyckelfiler
 
 ```
-App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar (Kort/Hjul/Ställen), snackbar, stämpelark; huvudlistan är en Animated.ScrollView vars skrollvärde (native) driver kortbunten
+App.js                       # Hela appskalet: state, NFC-loop, deep links, flikar (Kort/Hjul/Ställen), snackbar, stämpelark; huvudlistan är en Animated.ScrollView vars skrollvärde (native) driver kortbunten; säsongsdetaljer (fall/fyrverkeri + hälsning) spelas vid start och när appen kommer fram
 app.json                     # Expo-konfig: bundle-id se.tappass.app, NFC-plugin, deep links
 eas.json                     # EAS-byggprofiler (development/preview/production)
 .eas/workflows/              # Manuella EAS-arbetsflöden: publicera OTA till preview/production (kräver GitHub-koppling i Expo)
@@ -46,9 +46,10 @@ src/
   lib/
     nfc.js                   # NFC-läsning: requestTechnology(Ndef) → getTag → dekoda Text/URI
     useNfcStatus.js          # Hook: pollar isSupported/isEnabled varannan sekund
-    useReduceMotion.js       # Hook: "Reducera rörelse"/"Ta bort animationer" på → kortbuntens djup och glansens loop stängs av
+    useReduceMotion.js       # Hook: "Reducera rörelse"/"Ta bort animationer" på → kortbuntens djup, glansens loop och säsongsfallet stängs av
+    season.js                # Säsongsdetaljer efter svensk kalender (telefonens datum): snö 1/12–6/1, Lucia, jul, nyår (fyrverkeri), fettisdagen, påsk (skärtorsdag–annandagen), midsommar (afton + dag), kanelbullens dag; påskdagen och midsommarafton räknas ut
     supabase.js              # Supabase-klient + RPC-wrappers (tapToken, saveReward, loadWallet, wheelStatus, spinWheel, claimWheelPrize …)
-    wheel.js                 # Dagens hjul: fältgeometri (10 × 36°, vinstfält 0/3/5/8), målrotation, nedräknings- och giltighetstexter
+    wheel.js                 # Dagens hjul: fältgeometri (10 × 36°, vinstfält 0/3/5/8), målrotation, tickTimes (när fältgränser passerar pekaren under ett snurr), nedräknings- och giltighetstexter
     theme.js                 # K · Expressiv: tokens (T, RADIUS, FONT), FONT_FILES (inbäddad Roboto Flex) + tone(ink) = palett per butik
     shapes.js                # Genererade SVG-banor (cookie9/12, sunny8, burst12, flower8, clover4) i 100×100-viewBox
     icons.js                 # Lucide-ikonmappning
@@ -65,8 +66,10 @@ src/
     Snackbar.js              # Meddelanden: nätfel (med "Försök igen"), sparad belöning blockerar, okänd stämpel, väntetid, hjulets förlusttext
     RewardSheet.js           # Inlösen: låst ark (dra för att visa) → 6-siffrig kod → pollar → koden löses upp i partiklar (0,8 s) → "Inlöst!" med bock, stämplarna lyfter och kortet börjar om på överskottet (nätfel ≠ inlöst)
     CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad: konfetti ur stämpeln + två kanoner från nederhörnen (tung vibration), "Visa koden nu" eller "Spara till senare" (+ överskott som följer med)
-    DailyWheel.js            # Fliken Dagens hjul: stadsväljare, snurr, vinstark (välj 1 av 3 ställen), regler, aktiva dubbelstämplar
-    WheelGraphic.js          # Själva hjulet (SVG, 10 fält) som roteras med Animated
+    DailyWheel.js            # Fliken Dagens hjul: stadsväljare, snurr (tick-vibration per fält; vinst = lysande fält + strålar i 1,4 s före vinstarket; förlust = hjulet vickar tillbaka), vinstark (välj 1 av 3 ställen), regler, aktiva dubbelstämplar
+    WheelGraphic.js          # Själva hjulet (SVG, 10 fält, piggar vid fältgränserna) som roteras med Animated; pekaren knäpper mot piggarna (Animated.modulo av rotationen, native)
+    LightRays.js             # Ljusstrålar i lime som växer fram och snurrar bakom hjulet vid vinst
+    SeasonFall.js            # Snö, fjädrar, kronblad eller bullar som singlar ner en gång över skärmen (inställningar från season.js)
     Confetti.js              # Konfetti av designens former med fysik (kast, luftmotstånd, fladder, vändningar) uträknad i förväg och spelad på native-tråden; regn uppifrån eller kast från punkter (from)
     AppLinkOnboarding.js     # Välkomstskärm + steg, plattformsgrenad (Android App Links vs iOS Universal Links/skanna)
     BrandMark.js             # TapPass-symbolen (lime-punkt + radarbågar) som vektor

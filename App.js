@@ -1,6 +1,6 @@
 import "react-native-url-polyfill/auto";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
-import { View, Text, Pressable, ScrollView, Animated, StatusBar, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
+import { View, Text, Pressable, ScrollView, Animated, Dimensions, StatusBar, ActivityIndicator, RefreshControl, Platform, TextInput, Share, AppState, Linking as RNLinking } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Font from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
@@ -15,6 +15,10 @@ import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStam
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
 import CardStack from "./src/components/CardStack";
+import SeasonFall from "./src/components/SeasonFall";
+import Confetti from "./src/components/Confetti";
+import useReduceMotion from "./src/lib/useReduceMotion";
+import { seasonFor } from "./src/lib/season";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -96,6 +100,11 @@ export default function App() {
   const scrollY = useRef(new Animated.Value(0)).current;
   const onScroll = useMemo(() => Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true }), [scrollY]);
   const [listH, setListH] = useState(0);
+  // Säsongsdetaljer (snö i december, påsk, midsommar …) spelas när appen öppnas
+  // och varje gång den kommer fram igen. Av med "Reducera rörelse"; hälsningen blir kvar.
+  const reduceMotion = useReduceMotion();
+  const [seasonRun, setSeasonRun] = useState(1);
+  const season = useMemo(() => seasonFor(new Date()), [seasonRun]);
   const [rewardId, setRewardId] = useState(null);
   const [celebrationId, setCelebrationId] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -206,6 +215,7 @@ export default function App() {
         refreshWallet();
         loadWheel();
       }
+      if (last === "background" && next === "active") setSeasonRun((n) => n + 1);
       last = next;
     });
     return () => sub.remove();
@@ -433,6 +443,7 @@ export default function App() {
               cafes={allCafes}
               scrollY={scrollY}
               listH={listH}
+              season={season}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -449,6 +460,14 @@ export default function App() {
             <PlacesTab cafes={allCafes} wallet={wallet} />
           )}
         </Animated.ScrollView>
+
+        {!reduceMotion && season && season.fall && <SeasonFall key={"season" + seasonRun} {...season.fall} />}
+        {!reduceMotion && season && season.burst && (
+          <Confetti key={"nyar" + seasonRun} colors={["#E3B53B", T.lime, T.primary, "#F2AFC4", "#FFFFFF"]} from={[
+            { x: Dimensions.get("window").width * 0.28, y: 170, count: 22, spread: 180, speed: [380, 720], delay: 300 },
+            { x: Dimensions.get("window").width * 0.74, y: 120, count: 22, spread: 180, speed: [380, 720], delay: 900 },
+          ]} />
+        )}
 
         <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}>
           {tab === "home" && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
@@ -494,7 +513,18 @@ function Chip({ label, selected, onPress }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH }) {
+// Dagens hälsning (Lucia, jul, nyår, fettisdagen, påsk, midsommar, kanelbullens dag).
+function SeasonChip({ season }) {
+  const chip = season.chip || { kind: "sunny8", color: T.lime };
+  return (
+    <View style={{ marginLeft: "auto", height: 32, paddingLeft: 6, paddingRight: 12, borderRadius: 16, backgroundColor: T.surface, borderWidth: 1, borderColor: T.hairline, flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Shape kind={chip.kind} size={20} color={chip.color} />
+      <Text style={{ fontFamily: FONT.semibold, fontSize: 13, color: T.ink }}>{season.greeting}</Text>
+    </View>
+  );
+}
+
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -509,6 +539,7 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
         {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
+        {!!(season && season.greeting) && <SeasonChip season={season} />}
       </View>
       <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} />
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
