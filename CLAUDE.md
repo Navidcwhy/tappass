@@ -51,12 +51,14 @@ src/
     theme.js                 # K · Expressiv: tokens (T, RADIUS, FONT), FONT_FILES (inbäddad Roboto Flex) + tone(ink) = palett per butik
     shapes.js                # Genererade SVG-banor (cookie9/12, sunny8, burst12, flower8, clover4) i 100×100-viewBox
     icons.js                 # Lucide-ikonmappning
-    prefs.js                 # Lokala UI-inställningar i AsyncStorage (onboarding-flagga, hjulets stad)
+    prefs.js                 # Lokala UI-inställningar i AsyncStorage (onboarding-flagga, första stämpeln, hjulets stad)
   components/
     Shape.js                 # En mjuk form i en färg med valfritt innehåll ovanpå (grundbyggstenen i designen)
-    StampRow.js              # Stämpelrad: fyllda "cookies" med bock, tomma i dekorton, pop-animation för nyaste
+    StampRow.js              # Stämpelrad: fyllda "cookies" med bock, tomma i dekorton; nya stämplar studsar in i tur och ordning, sista tomma rutan lyser (present) när en är kvar
     LoyaltyCard.js           # Stämpelkort med progress, "BELÖNING KLAR"-, "SPARAD BELÖNING"- och "Dubbelstämpel aktiv"-lägen
-    StampSheet.js            # Bottenark "+1" (eller "+2" vid dubbelstämpel) efter lyckad stämpel (stänger sig själv efter 4,5 s)
+    StampSheet.js            # Stämpelögonblicket: stämpeln slår ner (squash, bläckstänk, våg, vibration i takt med nedslaget); dubbelstämpel = två nedslag → "+2" med ×2; första stämpeln någonsin = välkomst + konfetti. Stänger sig själv efter 4,5 s (5,2 s dubbel, 6,5 s första)
+    InkSplash.js             # Bläckstänk: partiklar i butikens färg som skjuts ut från mitten (spelas vid montering)
+    RadarBadge.js            # Radarvågor som i TapPass-symbolen medan telefonen lyssnar (Android-raden, iOS-knappen under skanning)
     Snackbar.js              # Meddelanden: nätfel (med "Försök igen"), sparad belöning blockerar, okänd stämpel, väntetid, hjulets förlusttext
     RewardSheet.js           # Inlösen: låst ark (dra för att visa) → 6-siffrig kod → pollar → "Inlöst!" (nätfel ≠ inlöst)
     CelebrationScreen.js     # Fullskärmsfirande vid full stämpelrad: "Visa koden nu" eller "Spara till senare" (+ överskott som följer med)

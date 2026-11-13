@@ -67,11 +67,21 @@ export default function LoyaltyCard({ card, onOpenReward }) {
         </View>
       ) : (
         <View>
-          <Text style={{ fontFamily: FONT.title, fontSize: 22, lineHeight: 26, color: t.onContainer, marginTop: 14 }}>
-            {left} kvar till {lowerFirst(c.rewardShort || c.reward)}
-          </Text>
+          {left === 1 ? (
+            <View style={{ marginTop: 14 }}>
+              <Text style={{ fontFamily: FONT.title, fontSize: 22, lineHeight: 26, color: t.onContainer }}>Nästa är gratis!</Text>
+              <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: t.muted, marginTop: 2 }}>
+                En stämpel kvar till {lowerFirst(c.rewardShort || c.reward)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={{ fontFamily: FONT.title, fontSize: 22, lineHeight: 26, color: t.onContainer, marginTop: 14 }}>
+              {left} kvar till {lowerFirst(c.rewardShort || c.reward)}
+            </Text>
+          )}
           <View style={{ marginTop: 12 }}>
-            <StampRow total={needed} filled={stamps} tone={t} />
+            {/* Sista rutan lyser när bara en stämpel är kvar */}
+            <StampRow total={needed} filled={stamps} tone={t} glowIndex={left === 1 ? stamps : -1} />
           </View>
         </View>
       )}
