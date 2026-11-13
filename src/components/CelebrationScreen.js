@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable, Modal, Animated, Dimensions, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
@@ -37,36 +37,47 @@ function Decor({ tone: t }) {
   );
 }
 
+const CANNON_AT = 450;   // ms efter att firandet öppnats
+
 // Helskärm när en stämpelrad blir full: "Visa koden nu" eller "Spara till senare".
 // Stängs den utan val ligger kortet kvar som "Belöning klar" på hemskärmen.
+// Konfetti med fysik i butikens färger: först ur den fulla stämpeln, sedan två
+// kanoner från skärmens nederhörn.
 export default function CelebrationScreen({ visible, card, carry = 0, busy, onSave, onRedeemNow, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
+  const [mid, setMid] = useState(null);       // mittytans läge i skärmen
+  const [badge, setBadge] = useState(null);   // stämpelns läge i mittytan
 
   useEffect(() => {
-    if (!visible) { pop.setValue(0); fade.setValue(0); return; }
+    if (!visible) { pop.setValue(0); fade.setValue(0); setMid(null); setBadge(null); return; }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Animated.spring(pop, { toValue: 1, friction: 5, tension: 45, useNativeDriver: true }).start();
     Animated.timing(fade, { toValue: 1, duration: 500, delay: 700, useNativeDriver: true }).start();
+    const boom = setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), CANNON_AT);
+    return () => clearTimeout(boom);
   }, [visible]);
 
   if (!visible || !card) return null;
   const t = toneFor(card.ink);
   const needed = Math.max(1, card.needed || 1);
+  const colors = [t.primary, t.deco, T.lime, "#FFFFFF", t.onContainer];
+  const burstFrom = mid && badge
+    ? [{ x: mid.x + badge.x + badge.width / 2, y: mid.y + badge.y + badge.height / 2, count: 36, angle: -90, spread: 80, speed: [900, 1800], delay: 60 }]
+    : null;
 
   return (
     <Modal visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: t.container, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
         <Decor tone={t} />
-        <Confetti count={26} colors={[t.primary, t.deco, "#FFFFFF", T.lime]} />
 
         <Pressable accessibilityLabel="Stäng" onPress={onClose} style={{ alignSelf: "flex-end", width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" }}>
           <Icon name="close" size={24} color={t.onContainer} />
         </Pressable>
 
-        <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
-          <Animated.View style={{
+        <View onLayout={(e) => setMid(e.nativeEvent.layout)} style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
+          <Animated.View onLayout={(e) => setBadge(e.nativeEvent.layout)} style={{
             width: 260, height: 260, alignItems: "center", justifyContent: "center",
             transform: [{ scale: pop }, { rotate: pop.interpolate({ inputRange: [0, 1], outputRange: ["-25deg", "0deg"] }) }],
           }}>
@@ -115,6 +126,13 @@ export default function CelebrationScreen({ visible, card, carry = 0, busy, onSa
             Sparar du belöningen pausas stämpling hos {card.name} tills du löst in den.
           </Text>
         </Animated.View>
+
+        {/* Konfettin ligger överst men tar aldrig emot tryck */}
+        {burstFrom && <Confetti colors={colors} from={burstFrom} />}
+        <Confetti colors={colors} from={[
+          { x: -8, y: H * 0.9, count: 20, angle: -68, spread: 12, speed: [1900, 2600], delay: CANNON_AT },
+          { x: W + 8, y: H * 0.9, count: 20, angle: -112, spread: 12, speed: [1900, 2600], delay: CANNON_AT },
+        ]} />
       </View>
     </Modal>
   );
