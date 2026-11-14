@@ -10,8 +10,8 @@ import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
 import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
-import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId, birthdayStatus } from "./src/lib/supabase";
-import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp, getAccount, setAccount, clearAccount, accountHintDismissed, dismissAccountHint } from "./src/lib/prefs";
+import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId, birthdayStatus, inviteStatus, ackInvites } from "./src/lib/supabase";
+import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp, getAccount, setAccount, clearAccount, accountHintDismissed, dismissAccountHint, inviteHintDismissed, dismissInviteHint } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
 import CardStack from "./src/components/CardStack";
@@ -33,6 +33,8 @@ import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
 import AccountSheet from "./src/components/AccountSheet";
 import BirthdaySheet, { PINK } from "./src/components/BirthdaySheet";
 import { bannerText } from "./src/lib/birthday";
+import InviteSheet from "./src/components/InviteSheet";
+import { INVITE_STAMPS, unseenText } from "./src/lib/invite";
 import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
 import Shape from "./src/components/Shape";
@@ -156,6 +158,12 @@ export default function App() {
   // Födelsedagspresent (v15): birthday_status för kontot (null = inget konto / inte hämtat)
   const [birthday, setBirthdayState] = useState(null);
   const [birthdayOpen, setBirthdayOpen] = useState(false);
+  // Bjud in en vän (v16): invite_status (null = inte hämtat / server före v16)
+  const [invite, setInviteState] = useState(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteHintOff, setInviteHintOff] = useState(true);
+  const inviteRef = useRef(null);
+  const loadInviteRef = useRef(null);
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   // Första stämpeln någonsin på telefonen (välkomstfirande). true tills flaggan lästs,
@@ -275,6 +283,7 @@ export default function App() {
         loadWheel();
         if (!authMethodsRef.current) loadAuthMethods();
         loadBirthday();
+        if (loadInviteRef.current) loadInviteRef.current();
       }
       if (last === "background" && next === "active") setSeasonRun((n) => n + 1);
       last = next;
@@ -338,6 +347,29 @@ export default function App() {
     })();
     return () => { alive = false; };
   }, [loadAuthMethods, loadBirthday, applyAccount, showToast]);
+
+  // Bjud in en vän (v16): läget, och meddelanden när en inbjuden vän stämplat (inbjudaren)
+  // eller när den egna inbjudan gett stämplar (den nya kunden). Visas en gång.
+  const applyInvite = useCallback((s) => { inviteRef.current = s; setInviteState(s); }, []);
+  const loadInvite = useCallback(async () => {
+    const before = inviteRef.current;
+    const s = await inviteStatus();
+    if (!s || !s.ok || s.unavailable) return s;
+    applyInvite(s);
+    const wasPending = !!(before && before.entered && before.entered.status === "pending");
+    if (wasPending && s.entered && s.entered.status === "rewarded") {
+      showToast({ type: "info", icon: "friends", title: "Välkomstbonus!", subtitle: "Du och din vän fick " + INVITE_STAMPS + " stämplar var" + (s.entered.cafe_name ? " hos " + s.entered.cafe_name : "") + "." }, 5500);
+    } else if (Array.isArray(s.unseen) && s.unseen.length) {
+      showToast({ type: "info", icon: "friends", ...unseenText(s.unseen) }, 5500);
+      ackInvites();
+      refreshWallet();
+    }
+    return s;
+  }, [applyInvite, showToast, refreshWallet]);
+  loadInviteRef.current = loadInvite;
+  useEffect(() => { if (synced) loadInvite(); }, [synced, loadInvite]);
+  const inviteCheckRef = useRef(false);   // en stämpling kan ha gett välkomstbonusen
+  useEffect(() => { inviteHintDismissed().then(setInviteHintOff).catch(() => {}); }, []);
 
   const stampTimer = useRef(null);
   const closeStamp = useCallback(() => {
@@ -408,6 +440,10 @@ export default function App() {
     const levelUp = before && before.hasLevels ? crossedLevel(before.visits, afterTap(card, before).visits) : null;
     setWallet((prev) => ({ ...prev, [card.slug]: afterTap(keepSavings(card, prev[card.slug]), prev[card.slug]) }));
     if (result.bonus_applied) loadWheel();
+    // v16: väntar den egna inbjudan på första stämpeln? Då gav den här stämplingen bonusen —
+    // läget hämtas när stämpelarket stängts, så att meddelandet inte hamnar bakom det.
+    const inv = inviteRef.current;
+    if (inv && inv.entered && inv.entered.status === "pending") inviteCheckRef.current = true;
 
     const added = result.stamps_added === 2 ? 2 : 1;
     const tier = result.complete ? null : crossedTier(card, added);
@@ -423,6 +459,14 @@ export default function App() {
       showStamp({ ...card, added, first, quiet: !!result.quiet_applied, levelUp });
     }
   }, [showToast, showStamp, loadWheel]);
+
+  // Välkomstbonusen (v16) visas när stämpelarket och firandet är stängda
+  useEffect(() => {
+    if (!inviteCheckRef.current || stampCard || celebrationId) return undefined;
+    inviteCheckRef.current = false;
+    const t = setTimeout(() => loadInvite(), 300);
+    return () => clearTimeout(t);
+  }, [stampCard, celebrationId, loadInvite]);
 
   // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
   // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
@@ -534,6 +578,7 @@ export default function App() {
       if (ev.type !== "gone") setWallet({});
     }
     loadBirthday();
+    loadInvite();
     const [rows] = await Promise.all([loadWallet(), loadWheel()]);
     if (rows) setWallet(walletFromRows(rows));
     setAccountEpoch((n) => n + 1);   // sparat-räknaren utgår från de nya korten (räknar inte upp)
@@ -549,6 +594,13 @@ export default function App() {
   const birthdayBanner = account ? bannerText(birthday) : null;
   const birthdayOn = !!(account && birthday && birthday.ok && !birthday.unavailable);
   const birthdayOffered = allCafes.some((c) => c.birthdayText);
+  // v16: rutan "Bjud in en vän" under korten (aldrig samtidigt som kontorutan)
+  const showInviteHint = !!invite && !showAccountHint && !inviteHintOff;
+  const onDismissInvite = () => { setInviteHintOff(true); dismissInviteHint(); };
+  const onInviteChanged = (ev) => {
+    if (ev.status) applyInvite(ev.status);
+    if (ev.redeemed) { loadInvite(); if (ev.redeemed.status === "rewarded") refreshWallet(); }
+  };
 
   const titles = { home: "Dina kort", wheel: "Dagens hjul", discover: "Ställen" };
   // Pricken på Hjul: oupphämtad vinst, eller ett snurr som faktiskt kan ge något i
@@ -610,6 +662,9 @@ export default function App() {
               onDismissHint={onDismissHint}
               birthdayBanner={birthdayBanner}
               onOpenBirthday={() => setBirthdayOpen(true)}
+              inviteHint={showInviteHint}
+              onInvite={invite ? () => setInviteOpen(true) : null}
+              onDismissInvite={onDismissInvite}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -623,7 +678,7 @@ export default function App() {
               onCloseRules={() => setRulesOpen(false)}
             />
           ) : (
-            <PlacesTab cafes={allCafes} wallet={wallet} quietKey={quietKey} />
+            <PlacesTab cafes={allCafes} wallet={wallet} quietKey={quietKey} onInvite={invite ? () => setInviteOpen(true) : null} />
           )}
         </Animated.ScrollView>
 
@@ -649,6 +704,7 @@ export default function App() {
         <AccountSheet visible={accountOpen} account={account} onChanged={onAccountChanged} onClose={() => setAccountOpen(false)}
           birthday={birthday} birthdayOn={birthdayOn} birthdayOffered={birthdayOffered} />
         <BirthdaySheet visible={birthdayOpen} status={birthday} cafes={allCafes} registerRedeem={registerRedeem} onChanged={loadBirthday} onClose={() => setBirthdayOpen(false)} />
+        <InviteSheet visible={inviteOpen} status={invite} onChanged={onInviteChanged} onClose={() => setInviteOpen(false)} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -703,14 +759,14 @@ function SeasonChip({ season }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, savingsKey, synced, accountHint, onAccountHint, onDismissHint, birthdayBanner, onOpenBirthday }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, savingsKey, synced, accountHint, onAccountHint, onDismissHint, birthdayBanner, onOpenBirthday, inviteHint, onInvite, onDismissInvite }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
   const shown = f === "ready" ? [...readyCards, ...pendingCards] : all;
 
   if (all.length === 0) {
-    return <EmptyHome onFindPlaces={onFindPlaces} onSimulate={onSimulate} cafes={cafes} />;
+    return <EmptyHome onFindPlaces={onFindPlaces} onSimulate={onSimulate} cafes={cafes} onInviteCode={onInvite} />;
   }
 
   return (
@@ -725,6 +781,7 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
       </View>
       <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} quietKey={quietKey} />
       {accountHint && <AccountHint onOpen={onAccountHint} onDismiss={onDismissHint} />}
+      {inviteHint && <InviteHint onOpen={onInvite} onDismiss={onDismissInvite} />}
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
     </View>
   );
@@ -744,6 +801,27 @@ function BirthdayBanner({ banner, onOpen }) {
       </View>
       <Icon name="chev" size={20} color={T.onTertiaryContainer} />
     </Pressable>
+  );
+}
+
+// Bjud in en vän (v16): under korten när kontorutan inte visas, tills kunden stänger den.
+function InviteHint({ onOpen, onDismiss }) {
+  return (
+    <View style={{ marginTop: 16, padding: 16, paddingRight: 8, borderRadius: 24, borderWidth: 1.5, borderStyle: "dashed", borderColor: T.outline, flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+      <Shape kind="clover4" size={48} color={T.secondaryContainer}>
+        <Icon name="friends" size={22} color={T.onSecondaryContainer} />
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.title, fontSize: 16, lineHeight: 22, color: T.ink }}>Bjud in en vän</Text>
+        <Text style={{ marginTop: 2, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>Ni får {INVITE_STAMPS} stämplar var när din vän stämplar första gången.</Text>
+        <Pressable onPress={onOpen} accessibilityRole="button" style={{ marginTop: 6, alignSelf: "flex-start", minHeight: 40, justifyContent: "center" }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.primary }}>Dela din kod</Text>
+        </Pressable>
+      </View>
+      <Pressable accessibilityLabel="Stäng tipset om att bjuda in" onPress={onDismiss} style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+        <Icon name="close" size={20} color={T.inkSoft} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -768,7 +846,7 @@ function AccountHint({ onOpen, onDismiss }) {
   );
 }
 
-function EmptyHome({ onFindPlaces, onSimulate, cafes }) {
+function EmptyHome({ onFindPlaces, onSimulate, cafes, onInviteCode }) {
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 32 }}>
       <View style={{ width: 240, height: 210 }}>
@@ -788,6 +866,12 @@ function EmptyHome({ onFindPlaces, onSimulate, cafes }) {
         <Icon name="pin" size={20} color={T.onSecondaryContainer} />
         <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: T.onSecondaryContainer }}>Se ställen med TapPass</Text>
       </Pressable>
+      {/* v16: ny kund med en väns kod */}
+      {!!onInviteCode && (
+        <Pressable onPress={onInviteCode} accessibilityRole="button" style={{ marginTop: 10, minHeight: 44, paddingHorizontal: 12, justifyContent: "center" }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: T.primary }}>Har du en kod från en vän?</Text>
+        </Pressable>
+      )}
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
     </View>
   );
@@ -809,7 +893,7 @@ function DevSimulate({ cafes, onSimulate }) {
   );
 }
 
-function PlacesTab({ cafes, wallet, quietKey }) {
+function PlacesTab({ cafes, wallet, quietKey, onInvite }) {
   const [q, setQ] = useState("");
   const [place, setPlace] = useState(null);   // v13: ställets sida (slug)
   const [type, setType] = useState(null);
@@ -867,6 +951,21 @@ function PlacesTab({ cafes, wallet, quietKey }) {
         <Text style={{ marginTop: 4, marginLeft: 4, fontFamily: FONT.regular, fontSize: 15, color: T.inkSoft }}>
           Inga ställen matchar {query ? "”" + q.trim() + "”" : "filtret"}.
         </Text>
+      )}
+
+      {/* v16: Bjud in en vän */}
+      {!!onInvite && (
+        <Pressable onPress={onInvite} accessibilityRole="button" accessibilityHint="Dela din kod med en vän"
+          style={({ pressed }) => ({ marginTop: 10, padding: 16, borderRadius: 24, backgroundColor: T.secondaryContainer, flexDirection: "row", alignItems: "center", gap: 14, opacity: pressed ? 0.9 : 1 })}>
+          <Shape kind="clover4" size={48} color={T.surface}>
+            <Icon name="friends" size={22} color={T.onSecondaryContainer} />
+          </Shape>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: FONT.title, fontSize: 16, lineHeight: 22, color: T.onSecondaryContainer }}>Bjud in en vän</Text>
+            <Text style={{ marginTop: 2, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.onSecondaryContainer }}>Ni får {INVITE_STAMPS} stämplar var när din vän stämplar första gången.</Text>
+          </View>
+          <Icon name="chev" size={20} color={T.onSecondaryContainer} />
+        </Pressable>
       )}
 
       <View style={{ marginTop: 10, padding: 16, borderRadius: 24, borderWidth: 1.5, borderStyle: "dashed", borderColor: T.outline, flexDirection: "row", alignItems: "flex-start", gap: 14 }}>

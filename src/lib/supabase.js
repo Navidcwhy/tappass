@@ -353,6 +353,26 @@ export async function redeemBirthdayByTap(cafeSlug, token) {
   return birthdayRpc("redeem_birthday_by_tap", { p_device_id: device_id, p_cafe_slug: cafeSlug, p_token: token });
 }
 
+// ── Bjud in en vän (v16) ─────────────────────────────────────────────────
+// { ok, code, can_redeem, redeem_until, entered, friends, rewarded, unseen }. Server före v16
+// → { ok: true, unavailable: true }; nätfel → { ok: false }.
+async function inviteRpc(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) return error.code === "PGRST202" ? { ok: true, unavailable: true } : { ok: false, error: "network" };
+    if (!data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+export async function inviteStatus() { return inviteRpc("invite_status", { p_device_id: await getDeviceId() }); }
+// Skapar koden (och kundraden) första gången
+export async function getInviteCode() { return inviteRpc("invite_code", { p_device_id: await getDeviceId() }); }
+// { ok, status: pending (+ until) | rewarded (+ cafe_slug, cafe_name) } eller { ok: false, error: unknown_code | own_code | already_used | too_late | mutual | network }
+export async function redeemInvite(code) { return inviteRpc("invite_redeem", { p_device_id: await getDeviceId(), p_code: code }); }
+export async function ackInvites() { return inviteRpc("invite_ack", { p_device_id: await getDeviceId() }); }
+
 export async function loadWallet() {
   const device_id = await getDeviceId();
   const { data, error } = await supabase.rpc("load_wallet", { p_device_id: device_id });
