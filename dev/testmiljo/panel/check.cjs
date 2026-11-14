@@ -349,7 +349,7 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
   }
   {
     const { ctx, page } = await open(browser, { width: 360, height: 800 });
-    await page.getByText("En kaffe på huset").waitFor();
+    await page.getByText("En kaffe på huset", { exact: true }).first().waitFor();
     const sw = await page.evaluate(() => document.documentElement.scrollWidth);
     ok(sw <= 360, "belöningar: ingen sidledsskroll vid 360 px (" + sw + ")");
     await ctx.close();
@@ -546,6 +546,104 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     ok(true, "engelska: vinn tillbaka");
     await secOf(page, "Monthly report").locator("select").waitFor();
     ok(true, "engelska: månadsrapport");
+    await ctx.close();
+  }
+
+  // 13. Profil (v13): butiken ändrar typ, område, belöningstext, färg, logga, adress, beskrivning, webbplats, Instagram, öppettider
+  const toneOf = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); const n = parseInt((m ? m[1] : "5D6B36"), 16); let r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2; let h = 0, s = 0; if (mx !== mn) { const d = mx - mn; s = d / (1 - Math.abs(2 * l - 1)); h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h = (h * 60 + 360) % 360; } const cl = (v, lo, hi) => Math.max(lo, Math.min(hi, v)); const sat = (lo, hi) => (s < 0.08 ? s : cl(s, lo, hi)); const hsl = (H, S, L) => { const C = (1 - Math.abs(2 * L - 1)) * S, X = C * (1 - Math.abs(((H / 60) % 2) - 1)), M = L - C / 2; const [R, G, B] = H < 60 ? [C, X, 0] : H < 120 ? [X, C, 0] : H < 180 ? [0, C, X] : H < 240 ? [0, X, C] : H < 300 ? [X, 0, C] : [C, 0, X]; return [R, G, B].map((v) => Math.round((v + M) * 255)); }; return { primary: hsl(h, s, cl(l, 0.18, 0.34)), container: hsl(h, sat(0.30, 0.48), 0.85) }; };
+  const hasBg = (page, rgb) => page.evaluate((c) => [...document.querySelectorAll("*")].some((e) => getComputedStyle(e).backgroundColor === `rgb(${c[0]}, ${c[1]}, ${c[2]})`), rgb);
+  {
+    const { ctx, page, errors } = await open(browser);
+    const st = ctx.__state;
+    const pf = secOf(page, "Profil");
+    await pf.getByText("Café Linnea · Stockholm · 10 stämplar för belöningen").waitFor();
+    const order = await page.evaluate(() => [...document.querySelectorAll("section h3")].map((h) => h.textContent));
+    eq(order[order.length - 1], "Profil", "Profil är sista sektionen");
+    ok(await secOf(page, "Belöningar").getByText("Belöningens text ändrar ni under Profil.", { exact: false }).isVisible(), "Belöningar: ny hänvisning till Profil");
+    // Etiketten kan innehålla hjälptexten ("BelöningVisas på kortet …") — matcha början
+    const field = (label) => pf.getByLabel(new RegExp("^" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    eq(await field("Typ av ställe").inputValue(), "Kafé", "typ ifylld");
+    eq(await field("Belöning").inputValue(), "En kaffe på huset", "belöning ifylld");
+    const save = pf.getByRole("button", { name: "Spara profil" });
+    ok(await save.isDisabled(), "inget ändrat: spara avstängd");
+    ok(await hasBg(page, toneOf("#7A4A26").container), "förhandsvisning i nuvarande färg");
+    await field("Typ av ställe").fill("Kafé & bageri");
+    await field("Beskrivning").fill("Surdeg och kaffe sedan 2012.");
+    ok(await pf.getByText("28/160").isVisible(), "räknare för beskrivning");
+    await field("Webbplats").fill("cafelinnea.se");
+    await pf.getByText("Ange hela adressen, t.ex. https://exempel.se").waitFor();
+    ok(await save.isDisabled(), "ogiltig webbplats: spara avstängd");
+    await field("Webbplats").fill("https://cafelinnea.se");
+    await field("Instagram").fill("café linnea");
+    await pf.getByText("Bara bokstäver, siffror, punkt och understreck.").waitFor();
+    ok(await save.isDisabled(), "ogiltigt Instagram: spara avstängd");
+    await field("Instagram").fill("@cafe.linnea");
+    await field("Adress").fill("Upplandsgatan 9, 113 23 Stockholm");
+    // Färg: välj grön ruta → förhandsvisningen följer
+    const swatch = pf.locator('[aria-label*="#2E6B4F" i], [title*="#2E6B4F" i]').first();
+    if (await swatch.count()) await swatch.click(); else await pf.getByLabel(/hex|#RRGGBB|Färgkod/i).fill("#2E6B4F");
+    await page.waitForTimeout(200);
+    ok(await hasBg(page, toneOf("#2E6B4F").container), "förhandsvisningen byter färg");
+    // Öppettider
+    await pf.getByRole("button", { name: "+ Lägg till tider" }).click();
+    await page.waitForTimeout(200);
+    ok(!(await save.isDisabled()), "ändrat och giltigt: kan spara");
+    await save.click();
+    await pf.getByText("Sparat", { exact: true }).waitFor();
+    const sent = st.calls.filter((c) => c.fn === "merchant_set_profile").at(-1).body.p_profile;
+    eq(Object.keys(sent).sort(), ["address", "area", "description", "ink_color", "instagram", "opening_hours", "reward_short", "reward_text", "type", "website"], "skickar alla fält");
+    eq([sent.type, sent.website, sent.ink_color.toUpperCase(), sent.address], ["Kafé & bageri", "https://cafelinnea.se", "#2E6B4F", "Upplandsgatan 9, 113 23 Stockholm"], "värdena");
+    ok(sent.instagram.replace(/^@/, "") === "cafe.linnea", "instagram");
+    ok(Array.isArray(sent.opening_hours) && sent.opening_hours.length === 1 && sent.opening_hours[0].days.length > 0 && sent.opening_hours[0].from < sent.opening_hours[0].to, "öppettider: en giltig rad " + JSON.stringify(sent.opening_hours));
+    eq(st.profile.type, "Kafé & bageri", "sparat i \"databasen\"");
+    ok(await save.isDisabled(), "efter sparning: inget osparat");
+    // Logga: ladda upp, förhandsvisning, ta bort
+    await pf.locator('input[type="file"]').setInputFiles("fixture-logo.png");
+    await page.waitForFunction(() => [...document.querySelectorAll("img")].some((i) => /^data:image\/(webp|png|jpeg);base64,/.test(i.src)), null, { timeout: 15000 });
+    const up = st.calls.filter((c) => c.fn === "merchant_set_logo").at(-1).body;
+    ok(["image/webp", "image/png", "image/jpeg"].includes(up.p_mime) && !/^data:/.test(up.p_data), "skickar base64 utan prefix (" + up.p_mime + ")");
+    const bytes = Buffer.from(up.p_data, "base64");
+    ok(bytes.length > 100 && bytes.length <= 200000, "storlek " + bytes.length + " byte");
+    eq(st.profile.logo_version, 1, "loggan sparad");
+    await pf.getByRole("button", { name: "Ta bort logga" }).click();
+    await page.waitForTimeout(600);
+    const rmv = st.calls.filter((c) => c.fn === "merchant_set_logo").at(-1).body;
+    eq([rmv.p_mime ?? null, rmv.p_data ?? null], [null, null], "ta bort: null");
+    // För stor fil
+    await pf.locator('input[type="file"]').setInputFiles({ name: "stor.png", mimeType: "image/png", buffer: Buffer.alloc(5 * 1024 * 1024 + 10, 1) });
+    await pf.getByText("Välj en bild under 5 MB.").waitFor();
+    ok(true, "för stor bild avvisas");
+    eq(errors, [], "inga sidfel (profil)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { rejectField: "website" });
+    const pf = secOf(page, "Profil");
+    await pf.getByText("Café Linnea · Stockholm", { exact: false }).waitFor();
+    await pf.getByLabel(/^Webbplats/).fill("https://exempel.se");
+    await pf.getByRole("button", { name: "Spara profil" }).click();
+    await pf.getByText("Kontrollera fältet.").waitFor();
+    ok(true, "serverns invalid_field visas vid fältet");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failProfile: true });
+    await page.getByText("Kunde inte hämta profilen just nu.").waitFor();
+    ok(await page.getByText("Belöningar", { exact: true }).isVisible(), "resten av panelen fungerar utan v13");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800 });
+    await secOf(page, "Profil").getByText("Café Linnea · Stockholm", { exact: false }).waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "profil: ingen sidledsskroll vid 360 px (" + sw + ")");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en" });
+    const pf = secOf(page, "Profile");
+    await pf.getByText("Café Linnea · Stockholm · 10 stamps for the reward").waitFor();
+    ok(await pf.getByRole("button", { name: /^Save( profile)?$/ }).isVisible() && await pf.getByLabel(/^Type of place/).isVisible(), "engelska: profil");
     await ctx.close();
   }
 

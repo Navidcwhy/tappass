@@ -7,7 +7,7 @@ const { mock } = require("./mock.cjs");
   const p = await ctx.newPage();
   await mock(p, { mainValue: 39, tiers: [{ at: 3, text: "Kanelbulle", value_kr: 25 }, { at: 5, text: "Valfri kaka", value_kr: 35 }] });
   await p.goto("http://127.0.0.1:5174/?lang=sv");
-  await p.getByText("En kaffe på huset").waitFor();
+  await p.getByText("En kaffe på huset", { exact: true }).first().waitFor();
   await p.addStyleTag({ content: "header{position:static!important}" });
   await p.waitForTimeout(900);
   const sec = p.locator("section", { has: p.getByRole("heading", { name: "Belöningar", exact: true }) });

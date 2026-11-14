@@ -90,6 +90,12 @@ async function mock(page, opts = {}) {
     failLapsed: !!opts.failLapsed,
     failWinback: !!opts.failWinback,
     report: opts.report ?? null,
+    // v13: profil
+    profile: opts.profile ?? { name: "Café Linnea", slug: "linnea", city: "Stockholm", stamps_needed: 10, type: "Kafé", area: "Vasastan",
+      reward_text: "En kaffe på huset", reward_short: "Gratis kaffe", ink_color: "#7A4A26", address: "", description: "", website: "",
+      instagram: "", opening_hours: [], logo_version: 0, logo: null, updated_at: null },
+    failProfile: !!opts.failProfile,
+    rejectField: opts.rejectField ?? null,
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -171,6 +177,36 @@ async function mock(page, opts = {}) {
       case "merchant_month_report": {
         const r = state.report || monthReport(body.p_month);
         return json({ ok: true, ...r });
+      }
+      case "merchant_get_profile":
+        if (state.failProfile) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "not found" }) });
+        return json({ ok: true, ...state.profile });
+      case "merchant_set_profile": {
+        const p = body.p_profile || {};
+        if (state.rejectField) return json({ ok: false, error: "invalid_field", field: state.rejectField }, 300);
+        const txt = (k, lo, hi) => typeof p[k] === "string" && p[k].trim().length >= lo && p[k].trim().length <= hi;
+        for (const [k, lo, hi] of [["type", 1, 30], ["area", 1, 40], ["reward_text", 1, 60], ["reward_short", 1, 40], ["address", 0, 120], ["description", 0, 160]])
+          if (k in p && !txt(k, lo, hi)) return json({ ok: false, error: "invalid_field", field: k }, 300);
+        if ("website" in p && p.website !== "" && !/^https?:\/\/[^\s/?#]+\.[^\s/?#]+([/?#]\S*)?$/i.test(p.website)) return json({ ok: false, error: "invalid_field", field: "website" }, 300);
+        if ("instagram" in p && p.instagram !== "" && !/^@?[A-Za-z0-9._]{1,30}$/.test(p.instagram)) return json({ ok: false, error: "invalid_field", field: "instagram" }, 300);
+        if ("ink_color" in p && !/^#[0-9A-Fa-f]{6}$/.test(p.ink_color)) return json({ ok: false, error: "invalid_field", field: "ink_color" }, 300);
+        if ("opening_hours" in p && (!Array.isArray(p.opening_hours) || p.opening_hours.length > 14 || p.opening_hours.some((h) => !h.days || !h.days.length || !(h.from < h.to))))
+          return json({ ok: false, error: "invalid_field", field: "opening_hours" }, 300);
+        const next = { ...state.profile };
+        for (const k of ["type", "area", "reward_text", "reward_short", "address", "description", "website"]) if (k in p) next[k] = p[k].trim();
+        if ("instagram" in p) next.instagram = p.instagram.replace(/^@/, "");
+        if ("ink_color" in p) next.ink_color = p.ink_color.toUpperCase();
+        if ("opening_hours" in p) next.opening_hours = p.opening_hours;
+        next.updated_at = new Date().toISOString();
+        state.profile = next;
+        return json({ ok: true, ...next }, 400);
+      }
+      case "merchant_set_logo": {
+        if (body.p_data == null) { state.profile = { ...state.profile, logo: null, logo_version: 0 }; return json({ ok: true, logo_version: 0 }, 300); }
+        const bytes = Buffer.from(String(body.p_data), "base64");
+        if (!["image/png", "image/jpeg", "image/webp"].includes(body.p_mime) || bytes.length < 12 || bytes.length > 200000) return json({ ok: false, error: "invalid_logo" }, 300);
+        state.profile = { ...state.profile, logo: { mime: body.p_mime, data: body.p_data }, logo_version: state.profile.logo_version + 1 };
+        return json({ ok: true, logo_version: state.profile.logo_version }, 400);
       }
       case "merchant_redeem_by_code":
         return json({ ok: true, code: body.p_code, carry_over: 0, tier_at: 5, reward: "Valfri kaka" }, 300);
