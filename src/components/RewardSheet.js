@@ -1,26 +1,38 @@
-import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Modal, Pressable, Animated, Easing, Dimensions, PanResponder, ActivityIndicator } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { View, Text, Modal, Pressable, Animated, Easing, Dimensions, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
-import { saveReward, getCurrentSavedCode } from "../lib/supabase";
+import { saveReward, getCurrentSavedCode, redeemByTap } from "../lib/supabase";
+import { IS_IOS, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "../lib/nfc";
+import useReduceMotion from "../lib/useReduceMotion";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 import InkSplash from "./InkSplash";
 
 const { width: W, height: H } = Dimensions.get("window");
 const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
+// "Miyabis", "Bryggans Bageris" — men "Ramen Bros" (slutar på s, x eller z)
+const genitive = (name) => { const n = (name || "").trim(); return /[sxz]$/i.test(n) ? n : n + "s"; };
+const clock = (d) => [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, "0")).join(".");
 
 /* ──────────────────────────────────────────────────────────────
-   Inlösen i tre steg:
-   1. Låst  — ark med förklaring + "Dra för att visa koden". Att dra sparar
-              belöningen (save_reward) och ger koden.
-   2. Kod   — helskärm. Personalen skriver in koden i tappass.se/m; appen pollar
-              och märker när den är inlöst. Då löses siffrorna upp i partiklar.
-   3. Inlöst — en stor bock; stämplarna lyfter från kortet, som börjar om på 0
-              (eller på överskottet, se carryOf).
+   Inlösen:
+   1. Låst    — ark med förklaring + "Lös in". Knappen sparar belöningen
+                (save_reward) och ger koden, som finns kvar som reserv.
+   2. Stämpel — helskärm "Håll telefonen mot stämpeln". Personalen håller butikens
+                TapPass-stämpel mot telefonen och appen löser in (redeem_by_tap, v9).
+                Fel butiks stämpel → "Fel stämpel – använd X-stämpeln."
+                Android läser i appens NFC-loop (App skickar hit via registerRedeem),
+                iOS kör en skanning per tryck. "Visa sifferkod" byter till koden.
+   2b. Kod    — helskärm med koden; personalen skriver in den i tappass.se/m.
+                Appen pollar i båda lägena och märker när koden är inlöst; då löses
+                siffrorna upp i partiklar.
+   3. Inlöst  — en stor bock och klockslaget för inlösen (en gammal skärmdump syns
+                på tiden); stämplarna lyfter från kortet, som börjar om på 0
+                (eller på överskottet, se carryOf).
    ────────────────────────────────────────────────────────────── */
 
 const DISSOLVE_MS = 800;   // koden löses upp innan "Inlöst!" visas
@@ -36,13 +48,36 @@ const carryOf = (card) => {
   return stamps >= needed ? stamps - needed : stamps;
 };
 
-export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
-  const [stage, setStage] = useState("loading"); // loading | locked | revealed | dissolve | redeemed
+// Varför inlösen med stämpeln inte gick (servern avgör, v9).
+export function tapErrorText(err, name) {
+  const store = (err && err.expected) || name;
+  switch (err && err.kind) {
+    case "wrong_tag": return { title: "Fel stämpel", text: "Använd " + store + "-stämpeln." };
+    case "unknown_tag": return { title: "Ingen TapPass-stämpel", text: "Håll telefonen mot " + store + "-stämpeln." };
+    case "not_complete": return { title: "Kortet är inte fullt än", text: "Belöningen går att lösa in när kortet är fullt." };
+    case "unavailable": return { title: "Fungerar inte just nu", text: "Visa sifferkoden för personalen i stället." };
+    case "read": return { title: "Kunde inte läsa stämpeln", text: "Håll stilla en sekund och försök igen." };
+    default: return { title: "Ingen anslutning", text: "Försök igen, eller visa sifferkoden för personalen." };
+  }
+}
+
+// Felbesked på det låsta arket (stämpeln lästes innan kunden tryckt "Lös in").
+const lockedErrorText = (err, name) => { const e = tapErrorText(err, name); return e.title + " – " + e.text; };
+
+export default function RewardSheet({ visible, card, onClose, onRedeemed, registerRedeem, autoRedeem = false }) {
+  const [stage, setStage] = useState("loading"); // loading | locked | tap | revealed | dissolve | redeemed
   const [code, setCode] = useState(null);
   const [carry, setCarry] = useState(0);         // överskottet, låst i ögonblicket koden löstes in
+  const [via, setVia] = useState("code");        // "tap" | "code" — visas på bekräftelsen
+  const [redeemedAt, setRedeemedAt] = useState(null);
   const [offline, setOffline] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
+  const [tapState, setTapState] = useState(IS_IOS ? "idle" : "waiting"); // waiting | scanning | reading | idle
+  const [tapError, setTapError] = useState(null);
+  const doneRef = useRef(false);       // inlöst — händer bara en gång per öppning
+  const busyRef = useRef(false);       // ett inlösenanrop i taget
+  const autoScanRef = useRef(false);   // iOS: skanna direkt efter "Lös in"
 
   // Kortet kan byta skepnad (eller försvinna) när plånboken laddas om efter
   // inlösen — visa då senast kända kort så att bekräftelsen inte blinkar bort.
@@ -61,8 +96,34 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     if (!visible) { setStage("loading"); setCode(null); }
   }, [visible]);
 
-  // Vid öppning: hämta ev. redan sparad kod. Vid nätfel visas låst läge — att dra
-  // anropar save_reward, som returnerar den sparade koden om den redan finns.
+  // "Lös in": sparar belöningen (ger koden som reserv) och väntar på stämpeln.
+  const handleRedeem = async () => {
+    const target = snap.current;
+    if (!target) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setSaving(true);
+    setSaveFailed(false);
+    setTapError(null);
+    const result = await saveReward(target.slug);
+    setSaving(false);
+    if (result.ok && result.code) {
+      setCode(result.code);
+      setTapError(null);
+      setTapState(IS_IOS ? "idle" : "waiting");
+      autoScanRef.current = true;
+      setStage("tap");
+    } else {
+      setSaveFailed(true);   // nätfel e.d. — kunden kan försöka igen
+    }
+  };
+  const handleRedeemRef = useRef(handleRedeem);
+  handleRedeemRef.current = handleRedeem;
+  const autoRedeemRef = useRef(autoRedeem);
+  autoRedeemRef.current = autoRedeem;
+
+  // Vid öppning: hämta ev. redan sparad kod (då väntar rutan direkt på stämpeln). Vid
+  // nätfel visas låst läge — "Lös in" anropar save_reward, som returnerar den sparade
+  // koden om den redan finns.
   // Beroende på slug (inte card-objektet) så att en uppdaterad plånbok inte laddar om rutan.
   useEffect(() => {
     if (!visible || !slug) return;
@@ -71,46 +132,127 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
     setOffline(false);
     setSaving(false);
     setSaveFailed(false);
+    setTapError(null);
+    setTapState(IS_IOS ? "idle" : "waiting");
+    doneRef.current = false;
+    busyRef.current = false;
+    autoScanRef.current = false;
     (async () => {
       const r = await getCurrentSavedCode(slug);
       if (!alive) return;
       if (r.ok && r.code) {
         setCode(r.code);
-        setStage("revealed");
+        setStage("tap");
       } else {
         setStage("locked");
+        // Från firandet ("Lös in nu"): kunden har redan valt — spara direkt.
+        if (autoRedeemRef.current) handleRedeemRef.current();
       }
     })();
     return () => { alive = false; };
   }, [visible, slug]);
 
-  // Polla varannan sekund medan koden visas, för att märka när personalen löst in.
-  // Bara ett säkert svar "ingen sparad kod" räknas som inlöst. Ett nätfel stänger
-  // aldrig rutan — kunden ska kunna visa koden även i en kassa med dålig täckning.
+  // Inlöst — med stämpeln eller för att koden försvann på servern. Bara en gång.
+  const finish = useCallback((carryN, how) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setCarry(carryN);
+    setVia(how);
+    setRedeemedAt(new Date());
+    setStage((s) => (s === "revealed" ? "dissolve" : "redeemed"));
+    onRedeemedRef.current(slug);
+  }, [slug]);
+
+  // Polla varannan sekund medan rutan väntar (stämpel eller kod), för att märka när
+  // personalen löst in med koden. Bara ett säkert svar "ingen sparad kod" räknas som
+  // inlöst. Ett nätfel stänger aldrig rutan — kunden ska kunna visa koden även i en
+  // kassa med dålig täckning.
   useEffect(() => {
-    if (stage !== "revealed" || !slug || !visible) return;
+    if ((stage !== "tap" && stage !== "revealed") || !slug || !visible) return;
     let alive = true;
     let timer = null;
 
     const check = async () => {
+      if (busyRef.current) return;        // en inlösen med stämpeln pågår
       const r = await getCurrentSavedCode(slug);
-      if (!alive) return;
+      if (!alive || doneRef.current || busyRef.current) return;
       if (!r.ok) { setOffline(true); return; }
       setOffline(false);
       if (!r.code) {
         alive = false;
         if (timer) clearInterval(timer);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setCarry(carryOf(snap.current));   // kortet före inlösen — plånboken laddas om strax
-        setStage("dissolve");
-        onRedeemedRef.current(slug);
+        finish(carryOf(snap.current), "code");   // kortet före inlösen — plånboken laddas om strax
       }
     };
 
     check();
     timer = setInterval(check, 2000);
     return () => { alive = false; if (timer) clearInterval(timer); };
-  }, [stage, slug, visible]);
+  }, [stage, slug, visible, finish]);
+
+  // Butikens stämpel lästes medan rutan väntar: lös in (App skickar hit i stället för
+  // att stämpla, se registerRedeem). Fel stämpel ger ett tydligt besked, inget annat.
+  const onTag = async (token) => {
+    if (doneRef.current || busyRef.current || !slug) return;
+    busyRef.current = true;
+    setTapError(null);
+    setTapState("reading");
+    const r = await redeemByTap(slug, token);
+    busyRef.current = false;
+    if (doneRef.current) return;
+    if (r.ok) {
+      finish(r.already ? carryOf(snap.current) : Math.max(0, Number(r.carry_over) || 0), r.already ? "code" : "tap");
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    setTapState(IS_IOS ? "idle" : "waiting");
+    setTapError({ kind: r.error || "network", expected: r.expected });
+  };
+  const onTagRef = useRef(onTag);
+  onTagRef.current = onTag;
+
+  // Även i låst läge: har kunden öppnat belöningen och personalen håller fram stämpeln
+  // löses den in direkt (servern löser in ett fullt kort utan sparad kod).
+  useEffect(() => {
+    if (!registerRedeem || !visible || (stage !== "locked" && stage !== "tap" && stage !== "revealed")) return;
+    registerRedeem((token) => onTagRef.current(token));
+    return () => registerRedeem(null);
+  }, [registerRedeem, visible, stage]);
+
+  // iOS: en skanning per tryck (Core NFC visar systemets ark).
+  const scanIos = async () => {
+    if (!IS_IOS || busyRef.current || doneRef.current) return;
+    setTapError(null);
+    setTapState("scanning");
+    try {
+      const token = await readToken({ alertMessage: "Håll iPhonen mot " + genitive(c.name) + " stämpel" });
+      if (token) {
+        await setIosAlert("Stämpel läst");
+        await cancelNfc();
+        await onTagRef.current(token);
+      } else {
+        await cancelNfc();
+        setTapState("idle");
+        setTapError({ kind: "unknown_tag", expected: c.name });
+      }
+    } catch (e) {
+      await cancelNfc();
+      setTapState("idle");
+      if (!isCancelOrTimeout(e)) setTapError({ kind: "read" });
+    }
+  };
+  const scanIosRef = useRef(scanIos);
+  scanIosRef.current = scanIos;
+
+  // iOS: starta skanningen direkt när kunden just tryckt "Lös in" (inte när en
+  // sparad belöning öppnas igen — då väljer kunden själv).
+  useEffect(() => {
+    if (stage === "tap" && IS_IOS && autoScanRef.current) {
+      autoScanRef.current = false;
+      scanIosRef.current();
+    }
+  }, [stage]);
 
   // Koden har lösts in: siffrorna löses upp, sedan kommer bekräftelsen.
   useEffect(() => {
@@ -121,36 +263,28 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed }) {
 
   if (!visible || !c) return null;
 
-  const handleReveal = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setSaving(true);
-    setSaveFailed(false);
-    const result = await saveReward(c.slug);
-    setSaving(false);
-    if (result.ok && result.code) {
-      setCode(result.code);
-      setStage("revealed");
-    } else {
-      setSaveFailed(true);   // nätfel e.d. — kunden kan dra igen
-    }
-  };
+  const close = () => { if (IS_IOS) cancelNfc(); onClose(); };
+  const showCode = () => { if (IS_IOS) cancelNfc(); setTapError(null); setStage("revealed"); };
+  const backToStamp = () => { setTapError(null); setTapState(IS_IOS ? "idle" : "waiting"); setStage("tap"); };
 
   const t = toneFor(c.ink);
   return (
-    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={close}>
       {stage === "loading" || stage === "locked" ? (
-        <LockedSheet card={c} tone={t} loading={stage === "loading"} saving={saving} saveFailed={saveFailed} onReveal={handleReveal} onClose={onClose} />
+        <LockedSheet card={c} tone={t} loading={stage === "loading"} saving={saving || tapState === "reading"} saveFailed={saveFailed} tapError={tapError} onRedeem={handleRedeem} onClose={close} />
+      ) : stage === "tap" ? (
+        <TapScreen card={c} tone={t} state={tapState} error={tapError} offline={offline} onScan={scanIos} onShowCode={showCode} onClose={close} />
       ) : stage === "revealed" || stage === "dissolve" ? (
-        <CodeScreen card={c} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onClose={onClose} />
+        <CodeScreen card={c} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onUseStamp={backToStamp} onClose={close} />
       ) : (
-        <RedeemedScreen card={c} tone={t} carry={carry} onClose={onClose} />
+        <RedeemedScreen card={c} tone={t} carry={carry} via={via} at={redeemedAt} onClose={close} />
       )}
     </Modal>
   );
 }
 
-/* ────────────── 1. LÅST — ARK MED "DRA FÖR ATT VISA KODEN" ────────────── */
-function LockedSheet({ card, tone: t, loading, saving, saveFailed, onReveal, onClose }) {
+/* ────────────── 1. LÅST — ARK MED "LÖS IN" ────────────── */
+function LockedSheet({ card, tone: t, loading, saving, saveFailed, tapError, onRedeem, onClose }) {
   const insets = useSafeAreaInsets();
   const rise = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -186,13 +320,27 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, onReveal, onC
         ) : (
           <View>
             <View style={{ marginTop: 20 }}>
-              <StepRow tone={t} icon="phone" text="Visa koden när du står i kassan" />
-              <StepRow tone={t} icon="keyboard" text="Personalen skriver in den i kassan" />
-              <StepRow tone={t} icon="reset" text={"Kortet börjar om på " + carry + "/" + needed + " när koden är inlöst"} />
+              <StepRow tone={t} icon="phone" text="Tryck på Lös in när du står i kassan" />
+              <StepRow tone={t} icon="nfc" text="Personalen håller butikens stämpel mot telefonen" />
+              <StepRow tone={t} icon="reset" text={"Kortet börjar om på " + carry + "/" + needed + " när belöningen är inlöst"} />
             </View>
-            <RevealSlider tone={t} saving={saving} onReveal={onReveal} />
-            <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: saveFailed ? T.errorText : T.inkSoft, textAlign: "center", marginTop: 12 }}>
-              {saveFailed ? "Det gick inte att hämta koden. Kontrollera nätet och dra igen." : "Koden kan bara lösas in en gång."}
+            <Pressable
+              onPress={saving ? undefined : onRedeem}
+              disabled={saving}
+              accessibilityRole="button"
+              accessibilityLabel="Lös in"
+              accessibilityState={{ busy: saving }}
+              style={({ pressed }) => ({ marginTop: 22, height: 64, borderRadius: 32, backgroundColor: t.primary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, opacity: pressed ? 0.88 : 1 })}
+            >
+              {saving
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                : <Icon name="nfc" size={22} color="#FFFFFF" strokeWidth={2.2} />}
+              <Text style={{ fontFamily: FONT.semibold, fontSize: 17, color: "#FFFFFF" }}>{saving ? "Löser in…" : "Lös in"}</Text>
+            </Pressable>
+            <Text accessibilityLiveRegion="polite" style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: saveFailed || tapError ? T.errorText : T.inkSoft, textAlign: "center", marginTop: 12 }}>
+              {tapError ? lockedErrorText(tapError, card.name)
+                : saveFailed ? "Det gick inte att lösa in. Kontrollera nätet och försök igen."
+                : "Belöningen kan bara lösas in en gång."}
             </Text>
           </View>
         )}
@@ -212,67 +360,103 @@ function StepRow({ tone: t, icon, text }) {
   );
 }
 
-function RevealSlider({ tone: t, saving, onReveal }) {
-  const TRACK = Math.min(W, 520) - 48;   // arkets innerbredd
-  const KNOB = 56;
-  const MAX = TRACK - KNOB - 8;
-  const dragX = useRef(new Animated.Value(0)).current;
-  const savingRef = useRef(saving);
-  savingRef.current = saving;
-  const onRevealRef = useRef(onReveal);
-  onRevealRef.current = onReveal;
+/* ────────────── 2. LÖS IN MED STÄMPELN ────────────── */
+// state: waiting (Android lyssnar) | scanning (iOS-arket är uppe) | reading (servern
+// löser in) | idle (iOS: väntar på att kunden trycker Skanna)
+function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, onClose }) {
+  const insets = useSafeAreaInsets();
+  const reduce = useReduceMotion();
+  const pop = useRef(new Animated.Value(0)).current;
+  const w1 = useRef(new Animated.Value(0)).current;
+  const w2 = useRef(new Animated.Value(0)).current;
+  const w3 = useRef(new Animated.Value(0)).current;
+  const listening = state === "waiting" || state === "scanning";
 
-  // Tillbaka till start när ett sparförsök är klart (lyckas det byts arket mot koden).
   useEffect(() => {
-    if (!saving) Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start();
-  }, [saving]);
+    Animated.spring(pop, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
+  }, []);
+  // Vågor ut från stämpeln medan telefonen lyssnar (står still med "Reducera rörelse").
+  useEffect(() => {
+    const waves = [w1, w2, w3];
+    if (!listening || reduce) { waves.forEach((v) => { v.stopAnimation(); v.setValue(0); }); return; }
+    const loops = waves.map((v) => Animated.loop(Animated.timing(v, { toValue: 1, duration: 2400, easing: Easing.out(Easing.quad), useNativeDriver: true })));
+    const timers = loops.map((l, i) => setTimeout(() => l.start(), i * 800));
+    return () => { timers.forEach(clearTimeout); loops.forEach((l) => l.stop()); };
+  }, [listening, reduce]);
 
-  const responder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !savingRef.current,
-      onMoveShouldSetPanResponder: () => !savingRef.current,
-      onPanResponderGrant: () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); },
-      onPanResponderMove: (_, g) => { dragX.setValue(Math.max(0, Math.min(MAX, g.dx))); },
-      onPanResponderRelease: (_, g) => {
-        const x = Math.max(0, Math.min(MAX, g.dx));
-        if (x >= MAX * 0.85) {
-          Animated.timing(dragX, { toValue: MAX, duration: 120, useNativeDriver: false }).start(() => onRevealRef.current());
-        } else {
-          Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start();
-        }
-      },
-      onPanResponderTerminate: () => { Animated.spring(dragX, { toValue: 0, friction: 7, useNativeDriver: false }).start(); },
-    })
-  ).current;
+  const S = Math.round(Math.min(260, W - 80, H * 0.32));
+  const core = Math.round(S * 0.6);
+  const wave = (v) => (
+    <Animated.View pointerEvents="none" style={{
+      position: "absolute", width: core, height: core, borderRadius: core, borderWidth: 3, borderColor: t.primary,
+      opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+      transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.65] }) }],
+    }} />
+  );
+  const err = error ? tapErrorText(error, card.name) : null;
+  const reading = state === "reading";
+  const status = reading ? "Löser in…"
+    : offline ? "Ingen anslutning — försöker igen…"
+    : IS_IOS ? (state === "scanning" ? "Håll iPhonen mot stämpeln…" : "Tryck på Skanna och håll iPhonen mot stämpeln")
+    : "Redo — håll telefonen mot stämpeln";
 
   return (
-    <View
-      accessible
-      accessibilityRole="button"
-      accessibilityLabel="Dra för att visa koden"
-      accessibilityActions={[{ name: "activate", label: "Visa koden" }]}
-      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === "activate" && !savingRef.current) onRevealRef.current(); }}
-      style={{ marginTop: 22, width: TRACK, height: 64, borderRadius: 32, backgroundColor: T.container, alignItems: "center", justifyContent: "center" }}
-    >
-      <Animated.Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.inkSoft, opacity: dragX.interpolate({ inputRange: [0, MAX * 0.6], outputRange: [1, 0], extrapolate: "clamp" }) }}>
-        Dra för att visa koden
-      </Animated.Text>
-      <View pointerEvents="none" style={{ position: "absolute", right: 20, top: 22 }}>
-        <Icon name="chevrons" size={20} color="#A9AB9C" strokeWidth={2.2} />
+    <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24, paddingHorizontal: 16, alignItems: "center" }}>
+      <View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Pressable accessibilityLabel="Stäng" onPress={onClose} style={{ width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" }}>
+          <Icon name="close" size={24} color={T.ink} />
+        </Pressable>
+        <Text numberOfLines={1} style={{ flex: 1, fontFamily: FONT.medium, fontSize: 22, color: T.ink }}>{card.name}</Text>
       </View>
-      <Animated.View {...responder.panHandlers} style={{ position: "absolute", left: 4, top: 4, transform: [{ translateX: dragX }] }}>
-        <Shape kind="cookie9" size={KNOB} color={t.primary}>
-          {saving
-            ? <ActivityIndicator size="small" color="#FFFFFF" />
-            : <Icon name="arrow" size={24} color="#FFFFFF" strokeWidth={2.4} />}
-        </Shape>
-      </Animated.View>
+
+      <View style={{ flex: 1, alignSelf: "stretch", alignItems: "center", justifyContent: "center" }}>
+        <Animated.View style={{ width: S, height: S, alignItems: "center", justifyContent: "center", opacity: pop, transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }] }}>
+          <Shape kind="sunny8" size={S} color={t.light} rotate={12} style={{ position: "absolute", left: 0, top: 0 }} />
+          {wave(w1)}{wave(w2)}{wave(w3)}
+          <Shape kind="cookie12" size={core} color={t.primary}>
+            {reading
+              ? <ActivityIndicator size="large" color="#FFFFFF" />
+              : <Icon name="nfc" size={Math.round(core * 0.4)} color="#FFFFFF" strokeWidth={2.2} />}
+          </Shape>
+        </Animated.View>
+
+        <Text style={{ marginTop: 24, fontFamily: FONT.title, fontSize: 26, lineHeight: 31, textAlign: "center", color: T.ink }}>{card.reward}</Text>
+        <Text style={{ marginTop: 8, maxWidth: 330, fontFamily: FONT.regular, fontSize: 16, lineHeight: 22, color: T.inkSoft, textAlign: "center" }}>
+          Personalen håller {genitive(card.name)} TapPass-stämpel mot din telefon.
+        </Text>
+
+        {err ? (
+          <View accessibilityLiveRegion="polite" style={{ marginTop: 20, alignSelf: "stretch", flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.errorContainer }}>
+            <Icon name="alert" size={22} color={T.errorText} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 15, lineHeight: 20, color: T.errorText }}>{err.title}</Text>
+              <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.errorText }}>{err.text}</Text>
+            </View>
+          </View>
+        ) : (
+          <Text accessibilityLiveRegion="polite" style={{ marginTop: 20, fontFamily: FONT.semibold, fontSize: 15, lineHeight: 20, color: offline ? T.errorText : T.ink, textAlign: "center" }}>{status}</Text>
+        )}
+
+        {IS_IOS && state !== "scanning" && !reading && (
+          <Pressable onPress={onScan} accessibilityRole="button"
+            style={({ pressed }) => ({ marginTop: 16, height: 56, paddingHorizontal: 24, borderRadius: 28, backgroundColor: t.primary, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.88 : 1 })}>
+            <Icon name="nfc" size={22} color="#FFFFFF" />
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Skanna stämpeln</Text>
+          </Pressable>
+        )}
+      </View>
+
+      <Pressable onPress={onShowCode} accessibilityRole="button"
+        style={({ pressed }) => ({ alignSelf: "stretch", height: 56, borderRadius: 28, borderWidth: 1, borderColor: T.outline, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, opacity: pressed ? 0.7 : 1 })}>
+        <Icon name="keyboard" size={20} color={T.ink} />
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.ink }}>Visa sifferkod i stället</Text>
+      </Pressable>
     </View>
   );
 }
 
 /* ────────────── 2. KODEN — HELSKÄRM ────────────── */
-function CodeScreen({ card, tone: t, code, offline, dissolving, onClose }) {
+function CodeScreen({ card, tone: t, code, offline, dissolving, onUseStamp, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const gone = useRef(new Animated.Value(0)).current;   // 0 → 1 medan koden löses upp
@@ -343,6 +527,16 @@ function CodeScreen({ card, tone: t, code, offline, dissolving, onClose }) {
           Nya stämplar hos {card.name} pausas tills koden är inlöst.
         </Text>
       </Animated.View>
+
+      {onUseStamp && (
+        <Animated.View style={{ alignSelf: "stretch", marginTop: 12, opacity: fadeEarly }}>
+          <Pressable onPress={dissolving ? undefined : onUseStamp} accessibilityRole="button"
+            style={({ pressed }) => ({ height: 52, borderRadius: 26, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, opacity: pressed ? 0.7 : 1 })}>
+            <Icon name="nfc" size={20} color={t.primary} />
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: t.primary }}>Lös in med stämpeln i stället</Text>
+          </Pressable>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -403,7 +597,7 @@ function Digit({ ch, delay, dissolving, size, box, color, splash }) {
 }
 
 /* ────────────── 3. INLÖST ────────────── */
-function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
+function RedeemedScreen({ card, tone: t, carry = 0, via = "code", at = null, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const tick = useRef(new Animated.Value(0)).current;
@@ -452,6 +646,14 @@ function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
             : "Smaklig måltid! Ditt kort hos " + card.name + " börjar om från noll."}
         </Animated.Text>
 
+        {/* Klockslaget för inlösen — personalen ser att skärmen inte är en gammal skärmdump */}
+        <Animated.View style={[{ marginTop: 14, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: T.container }, slide(22)]}>
+          <LiveDot color={t.primary} />
+          <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: T.ink }}>
+            {(via === "tap" ? "Inlöst med stämpeln" : "Inlöst med koden") + " kl. " + clock(at || new Date())}
+          </Text>
+        </Animated.View>
+
         <Animated.View style={[{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }, slide(28)]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Shape kind="cookie9" size={36} color={t.primary}>
@@ -474,5 +676,25 @@ function RedeemedScreen({ card, tone: t, carry = 0, onClose }) {
         <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Tillbaka till korten</Text>
       </Pressable>
     </View>
+  );
+}
+
+// Pulserande punkt: visar att bekräftelsen är levande (står still med "Reducera rörelse").
+function LiveDot({ color }) {
+  const reduce = useReduceMotion();
+  const p = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (reduce) { p.setValue(0); return; }
+    const a = Animated.loop(Animated.sequence([
+      Animated.timing(p, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(p, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    a.start();
+    return () => a.stop();
+  }, [reduce]);
+  return (
+    <Animated.View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color,
+      opacity: p.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35] }),
+      transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [1, 0.7] }) }] }} />
   );
 }

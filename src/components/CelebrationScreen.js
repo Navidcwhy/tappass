@@ -39,7 +39,7 @@ function Decor({ tone: t }) {
 
 const CANNON_AT = 450;   // ms efter att firandet öppnats
 
-// Helskärm när en stämpelrad blir full: "Visa koden nu" eller "Spara till senare".
+// Helskärm när en stämpelrad blir full: "Lös in nu" eller "Spara till senare".
 // Stängs den utan val ligger kortet kvar som "Belöning klar" på hemskärmen.
 // Konfetti med fysik i butikens färger: först ur den fulla stämpeln, sedan två
 // kanoner från skärmens nederhörn.
@@ -110,7 +110,7 @@ export default function CelebrationScreen({ visible, card, carry = 0, busy, onSa
             onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); onRedeemNow(); }}
             style={({ pressed }) => ({ height: 56, borderRadius: 28, backgroundColor: t.primary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, opacity: busy ? 0.6 : pressed ? 0.88 : 1 })}
           >
-            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Visa koden nu</Text>
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Lös in nu</Text>
           </Pressable>
           <Pressable
             disabled={busy}

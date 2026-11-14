@@ -108,6 +108,7 @@ export default function App() {
   const [seasonRun, setSeasonRun] = useState(1);
   const season = useMemo(() => seasonFor(new Date()), [seasonRun]);
   const [rewardId, setRewardId] = useState(null);
+  const [rewardAuto, setRewardAuto] = useState(false);
   const [celebrationId, setCelebrationId] = useState(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toast, setToast] = useState(null);
@@ -338,12 +339,21 @@ export default function App() {
   // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
   // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
   // servern spärrar dessutom med butikens väntetid. Gäller inte dev-simulering.
+  // Inlösen med tapp (v9): medan kodrutan väntar på butikens stämpel ska nästa lästa
+  // stämpel lösa in i stället för att stämpla. RewardSheet registrerar sig här.
+  const redeemRef = useRef(null);
+  const registerRedeem = useCallback((handler) => { redeemRef.current = handler; }, []);
+  // "Lös in" på ett kort i kortbunten (stabil, så att kortraderna inte ritas om i onödan).
+  const openRewardFromCard = useCallback((slug) => { setTab("home"); setRewardAuto(false); setRewardId(slug); }, []);
+
   const lastTagRef = useRef({ token: null, at: 0 });
   const sendTagTap = useCallback((token) => {
-    const key = String(token).toLowerCase();
+    const redeem = redeemRef.current;
+    const key = (redeem ? "r:" : "t:") + String(token).toLowerCase();
     const now = Date.now();
-    if (lastTagRef.current.token === key && now - lastTagRef.current.at < 5000) return;
+    if (lastTagRef.current.token === key && now - lastTagRef.current.at < (redeem ? 2000 : 5000)) return;
     lastTagRef.current = { token: key, at: now };
+    if (redeem) return redeem(token);
     return sendTap(token);
   }, [sendTap]);
 
@@ -365,8 +375,8 @@ export default function App() {
 
   const cards = Object.values(wallet);
   const pendingCards = cards.filter((c) => c.pendingReward);
-  // Fullt kort som inte sparats (kodrutan stängd före "dra för att visa koden",
-  // misslyckat sparande, appen stängd under firandet). Måste synas — annars
+  // Fullt kort som inte sparats (rutan stängd före "Lös in", misslyckat sparande,
+  // appen stängd under firandet). Måste synas — annars
   // finns belöningen bara i databasen och kunden hittar den aldrig.
   const readyCards = cards.filter((c) => !c.pendingReward && c.stamps >= c.needed);
   const progressCards = cards.filter((c) => !c.pendingReward && c.stamps < c.needed);
@@ -378,11 +388,15 @@ export default function App() {
     setLoadingAction(false);
     setCelebrationId(null);
   };
+  // Kodrutan öppnas alltid över fliken Kort: där körs Androids NFC-loop som läser
+  // butikens stämpel vid inlösen med tapp.
+  // auto: kunden tryckte "Lös in nu" i firandet — rutan sparar direkt och väntar på stämpeln.
+  const openReward = (slug, auto = false) => { setTab("home"); setRewardAuto(auto); setRewardId(slug); };
   const onRedeemNow = () => {
-    setRewardId(celebrationId);
+    openReward(celebrationId, true);
     setCelebrationId(null);
   };
-  // Personalen har löst in (koden försvann på servern) → hämta nytt kortläge.
+  // Inlöst (med butikens stämpel, eller personalen skrev in koden) → hämta nytt kortläge.
   // Kodrutan visar "Inlöst!" och stängs av kunden.
   const onRedeemed = async () => {
     setLoadingAction(true);
@@ -392,7 +406,7 @@ export default function App() {
 
   const onSnackAction = (a) => {
     setToast(null);
-    if (a.type === "open-reward" && a.slug) setRewardId(a.slug);
+    if (a.type === "open-reward" && a.slug) openReward(a.slug);
     if (a.type === "retry" && lastFailedTokenRef.current) sendTap(lastFailedTokenRef.current);
   };
 
@@ -454,7 +468,7 @@ export default function App() {
               progressCards={progressCards}
               filter={filter}
               setFilter={setFilter}
-              onOpenReward={setRewardId}
+              onOpenReward={openRewardFromCard}
               onFindPlaces={() => setTab("discover")}
               onSimulate={simulateStamp}
               cafes={allCafes}
@@ -495,7 +509,7 @@ export default function App() {
         <Snackbar toast={toast} bottom={bottomH + 12} onAction={onSnackAction} />
 
         <StampSheet card={stampCard} onClose={closeStamp} />
-        <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => setRewardId(null)} onRedeemed={onRedeemed} />
+        <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); }} onRedeemed={onRedeemed} registerRedeem={registerRedeem} autoRedeem={rewardAuto} />
         <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => setCelebrationId(null)} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
       </SafeAreaView>

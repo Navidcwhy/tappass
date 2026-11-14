@@ -59,8 +59,9 @@ export async function saveReward(cafeSlug) {
   }
 }
 
-// Inlösen görs bara av personalen (merchant_redeem_by_code i tappass.se/m).
-// Appens gamla redeem_reward-anrop är borttaget — servern stängde det i v4.
+// Inlösen görs med butikens stämpel (redeem_by_tap, nedan) eller av personalen med
+// koden (merchant_redeem_by_code i tappass.se/m). Appens gamla redeem_reward-anrop är
+// borttaget — servern stängde det i v4.
 
 // Sparad kod för ett kort.
 //   { ok: true, code: "123456" } — belöningen väntar på inlösen
@@ -74,6 +75,23 @@ export async function getCurrentSavedCode(cafeSlug) {
     return { ok: true, code: data.code || null };
   } catch {
     return { ok: false };
+  }
+}
+
+// Inlösen med butikens stämpel (v9): kunden har tryckt "Lös in" och personalen håller
+// stämpeln mot telefonen. Servern kontrollerar att stämpeln hör till butiken.
+// { ok: true, carry_over, stamps, already? } eller { ok: false, error: "wrong_tag" |
+// "unknown_tag" (+ expected/got) | "not_complete" | "unavailable" | "network" … }.
+// "unavailable" = funktionen finns inte på servern (v9 inte körd) — appen hänvisar till koden.
+export async function redeemByTap(cafeSlug, token) {
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await supabase.rpc("redeem_by_tap", { p_device_id: device_id, p_cafe_slug: cafeSlug, p_token: token });
+    if (error) return { ok: false, error: error.code === "PGRST202" ? "unavailable" : "network" };
+    if (!data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
   }
 }
 
