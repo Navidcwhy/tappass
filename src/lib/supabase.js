@@ -306,6 +306,53 @@ export async function accountStatus() {
   }
 }
 
+// ── Födelsedagspresent (v15) ─────────────────────────────────────────────
+// Bara konton. Nätfel → { ok: false }; en server före v15 → { ok: true, unavailable: true }.
+async function birthdayRpc(fn, args) {
+  try {
+    const { data, error } = await supabase.rpc(fn, args);
+    if (error) return error.code === "PGRST202" ? { ok: false, error: "unavailable", unavailable: true } : { ok: false, error: "network" };
+    if (!data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// { ok, linked, birthday: { month, day } | null, next_gift, window: { from, to } | null, gifts: [...] }
+export async function birthdayStatus() {
+  const device_id = await getDeviceId();
+  const r = await birthdayRpc("birthday_status", { p_device_id: device_id });
+  return r.unavailable ? { ok: true, unavailable: true, linked: false, birthday: null, window: null, gifts: [] } : r;
+}
+
+// month/day null = ta bort. { ok, birthday, next_gift } eller { ok: false, error: not_linked | invalid_date | network }
+export async function setBirthday(month, day) {
+  const device_id = await getDeviceId();
+  return birthdayRpc("account_set_birthday", { p_device_id: device_id, p_month: month, p_day: day });
+}
+
+// Kunden trycker "Lös in": { ok, code, reward, valid_until } eller { ok: false, error: not_eligible | already_redeemed | network }
+export async function claimBirthday(cafeSlug) {
+  const device_id = await getDeviceId();
+  return birthdayRpc("birthday_claim", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+}
+
+// Kodrutans pollning: { ok, code, redeemed, redeemedAt } — { ok: false } = vet inte (nätfel)
+export async function getBirthdayCode(cafeSlug) {
+  const device_id = await getDeviceId();
+  const r = await birthdayRpc("birthday_code", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+  if (!r.ok) return { ok: false };
+  return { ok: true, code: r.code || null, redeemed: !!r.redeemed, redeemedAt: r.redeemed_at || null };
+}
+
+// Personalen håller butikens stämpel mot telefonen: { ok, reward, redeemed_at, already? } eller
+// { ok: false, error: wrong_tag | unknown_tag (+ expected/got) | not_eligible | unavailable | network }
+export async function redeemBirthdayByTap(cafeSlug, token) {
+  const device_id = await getDeviceId();
+  return birthdayRpc("redeem_birthday_by_tap", { p_device_id: device_id, p_cafe_slug: cafeSlug, p_token: token });
+}
+
 export async function loadWallet() {
   const device_id = await getDeviceId();
   const { data, error } = await supabase.rpc("load_wallet", { p_device_id: device_id });

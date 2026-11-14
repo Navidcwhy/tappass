@@ -17,8 +17,8 @@ import InkSplash from "./InkSplash";
 const { width: W, height: H } = Dimensions.get("window");
 const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
 // "Miyabis", "Bryggans Bageris" — men "Ramen Bros" (slutar på s, x eller z)
-const genitive = (name) => { const n = (name || "").trim(); return /[sxz]$/i.test(n) ? n : n + "s"; };
-const clock = (d) => [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, "0")).join(".");
+export const genitive = (name) => { const n = (name || "").trim(); return /[sxz]$/i.test(n) ? n : n + "s"; };
+export const clock = (d) => [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => String(x).padStart(2, "0")).join(".");
 
 /* ──────────────────────────────────────────────────────────────
    Inlösen:
@@ -37,7 +37,7 @@ const clock = (d) => [d.getHours(), d.getMinutes(), d.getSeconds()].map((x) => S
                 (eller på överskottet, se carryOf).
    ────────────────────────────────────────────────────────────── */
 
-const DISSOLVE_MS = 800;   // koden löses upp innan "Inlöst!" visas
+export const DISSOLVE_MS = 800;   // koden löses upp innan "Inlöst!" visas
 const DIGIT_GAP = 45;      // ms mellan siffrorna när de löses upp
 const RESET_AT = 950;      // ms efter "Inlöst!" när stämplarna börjar lyfta
 const LIFT_GAP = 70;       // ms mellan stämplarna som lyfter
@@ -455,7 +455,8 @@ function StepRow({ tone: t, icon, text }) {
 /* ────────────── 2. LÖS IN MED STÄMPELN ────────────── */
 // state: waiting (Android lyssnar) | scanning (iOS-arket är uppe) | reading (servern
 // löser in) | idle (iOS: väntar på att kunden trycker Skanna)
-function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, onCancel, onClose }) {
+// Används även av födelsedagspresenten (BirthdaySheet).
+export function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, onCancel, onClose }) {
   const insets = useSafeAreaInsets();
   const reduce = useReduceMotion();
   const pop = useRef(new Animated.Value(0)).current;
@@ -554,7 +555,8 @@ function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, o
 }
 
 /* ────────────── 2. KODEN — HELSKÄRM ────────────── */
-function CodeScreen({ card, tone: t, code, offline, dissolving, onUseStamp, onClose }) {
+// note: texten i rutan längst ner (födelsedagspresenten pausar inga stämplar)
+export function CodeScreen({ card, tone: t, code, offline, dissolving, onUseStamp, onClose, note }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const gone = useRef(new Animated.Value(0)).current;   // 0 → 1 medan koden löses upp
@@ -622,7 +624,7 @@ function CodeScreen({ card, tone: t, code, offline, dissolving, onUseStamp, onCl
       <Animated.View style={{ alignSelf: "stretch", flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 16, backgroundColor: T.container, opacity: fadeEarly }}>
         <Icon name="info" size={20} color={T.inkSoft} />
         <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>
-          Nya stämplar hos {card.name} pausas tills koden är inlöst.
+          {note || "Nya stämplar hos " + card.name + " pausas tills koden är inlöst."}
         </Text>
       </Animated.View>
 

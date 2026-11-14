@@ -10,7 +10,7 @@ import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
 import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
-import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId } from "./src/lib/supabase";
+import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId, birthdayStatus } from "./src/lib/supabase";
 import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp, getAccount, setAccount, clearAccount, accountHintDismissed, dismissAccountHint } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
@@ -31,6 +31,8 @@ import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
 import AccountSheet from "./src/components/AccountSheet";
+import BirthdaySheet, { PINK } from "./src/components/BirthdaySheet";
+import { bannerText } from "./src/lib/birthday";
 import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
 import Shape from "./src/components/Shape";
@@ -66,6 +68,8 @@ function normalizeCafe(c) {
     instagram: c.instagram || "",
     openingHours: Array.isArray(c.opening_hours) ? c.opening_hours : [],
     logoVersion: Number(c.logo_version) || 0,
+    birthdayText: c.birthday_text || "",                              // v15: födelsedagspresent (tom = erbjuds inte)
+    birthdayValue: krValue(c.birthday_value_kr),
   };
 }
 
@@ -149,6 +153,9 @@ export default function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [hintDismissed, setHintDismissed] = useState(true);
   const [accountEpoch, setAccountEpoch] = useState(0);   // ny telefonnyckel → sparat-räknaren börjar om
+  // Födelsedagspresent (v15): birthday_status för kontot (null = inget konto / inte hämtat)
+  const [birthday, setBirthdayState] = useState(null);
+  const [birthdayOpen, setBirthdayOpen] = useState(false);
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   // Första stämpeln någonsin på telefonen (välkomstfirande). true tills flaggan lästs,
@@ -245,6 +252,18 @@ export default function App() {
     const m = await getAuthMethods();
     if (m) { authMethodsRef.current = m; setAuthMethods(m); }
   }, []);
+  // Kontot i en ref också, så att hämtningar som startar direkt efter ett byte ser det nya läget
+  const accountRef = useRef(null);
+  const applyAccount = useCallback((a) => { accountRef.current = a; setAccountState(a); }, []);
+  // Födelsedagsveckan (v15) — bara för konton. Ett sent svar skriver aldrig över ett nyare.
+  const birthdaySeq = useRef(0);
+  const loadBirthday = useCallback(async () => {
+    const seq = ++birthdaySeq.current;
+    if (!accountRef.current) { setBirthdayState(null); return; }
+    const s = await birthdayStatus();
+    if (seq !== birthdaySeq.current || !s || !s.ok) return;
+    setBirthdayState(s);
+  }, []);
 
   // Tillbaka från bakgrunden: hämta kort och hjul igen. Annars kan appen visa en
   // utgången dubbelstämpel eller sakna pricken för dagens snurr tills något laddar om.
@@ -255,12 +274,13 @@ export default function App() {
         refreshWallet();
         loadWheel();
         if (!authMethodsRef.current) loadAuthMethods();
+        loadBirthday();
       }
       if (last === "background" && next === "active") setSeasonRun((n) => n + 1);
       last = next;
     });
     return () => sub.remove();
-  }, [refreshWallet, loadWheel, loadAuthMethods]);
+  }, [refreshWallet, loadWheel, loadAuthMethods, loadBirthday]);
 
   // Nytt snurr vid midnatt: hämta läget när serverns nästa snurrtid passerats,
   // så att pricken på Hjul-fliken dyker upp även om appen står öppen.
@@ -304,18 +324,20 @@ export default function App() {
     (async () => {
       const [a, dismissed] = await Promise.all([getAccount(), accountHintDismissed()]);
       if (!alive) return;
-      setAccountState(a);
+      applyAccount(a);
       setHintDismissed(dismissed);
       loadAuthMethods();
       if (!a) return;
+      loadBirthday();
       const s = await accountStatus();
       if (!alive || !s.ok || s.linked) return;
       clearAccount();
-      setAccountState(null);
+      applyAccount(null);
+      setBirthdayState(null);
       showToast({ type: "info", icon: "user", title: "Utloggad från kontot", subtitle: "Logga in igen för att se dina sparade stämplar." }, 5000);
     })();
     return () => { alive = false; };
-  }, [loadAuthMethods, showToast]);
+  }, [loadAuthMethods, loadBirthday, applyAccount, showToast]);
 
   const stampTimer = useRef(null);
   const closeStamp = useCallback(() => {
@@ -499,17 +521,19 @@ export default function App() {
   // Konto (v14): telefonen kopplades, loggades ut (här eller från en annan telefon), fick
   // ny nyckel eller kontot raderades. Telefonens id kan ha bytts — hämta kort och hjul igen.
   const onAccountChanged = async (ev) => {
+    if (ev.type === "birthday") { loadBirthday(); return; }   // v15: födelsedagen sparad eller borttagen
     if (ev.type === "linked") {
       const a = { email: ev.email, since: new Date().toISOString() };
-      setAccountState(a);
+      applyAccount(a);
       setAccount(a);
     } else if (ev.type !== "rotated") {
       // logout: nytt slumpat id (deleteAccount har redan bytt id; "gone" behåller sitt)
       if (ev.type === "logout") await newDeviceId().catch(() => {});
-      setAccountState(null);
+      applyAccount(null);
       clearAccount();
       if (ev.type !== "gone") setWallet({});
     }
+    loadBirthday();
     const [rows] = await Promise.all([loadWallet(), loadWheel()]);
     if (rows) setWallet(walletFromRows(rows));
     setAccountEpoch((n) => n + 1);   // sparat-räknaren utgår från de nya korten (räknar inte upp)
@@ -521,6 +545,10 @@ export default function App() {
   const accountOn = !!account || !!(authMethods && authMethods.email);
   const showAccountHint = !account && !!(authMethods && authMethods.email) && !hintDismissed;
   const onDismissHint = () => { setHintDismissed(true); dismissAccountHint(); };
+  // v15: födelsedagsrutan medan veckan pågår och någon present finns kvar
+  const birthdayBanner = account ? bannerText(birthday) : null;
+  const birthdayOn = !!(account && birthday && birthday.ok && !birthday.unavailable);
+  const birthdayOffered = allCafes.some((c) => c.birthdayText);
 
   const titles = { home: "Dina kort", wheel: "Dagens hjul", discover: "Ställen" };
   // Pricken på Hjul: oupphämtad vinst, eller ett snurr som faktiskt kan ge något i
@@ -580,6 +608,8 @@ export default function App() {
               accountHint={showAccountHint}
               onAccountHint={() => setAccountOpen(true)}
               onDismissHint={onDismissHint}
+              birthdayBanner={birthdayBanner}
+              onOpenBirthday={() => setBirthdayOpen(true)}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -616,7 +646,9 @@ export default function App() {
         <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); setRewardTier(null); }} onRedeemed={onRedeemed} onCancelled={refreshWallet} registerRedeem={registerRedeem} autoRedeem={rewardAuto} preferTier={rewardTier} />
         <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} tier={celebrationTier} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => { setCelebrationId(null); setCelebrationTier(null); }} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
-        <AccountSheet visible={accountOpen} account={account} onChanged={onAccountChanged} onClose={() => setAccountOpen(false)} />
+        <AccountSheet visible={accountOpen} account={account} onChanged={onAccountChanged} onClose={() => setAccountOpen(false)}
+          birthday={birthday} birthdayOn={birthdayOn} birthdayOffered={birthdayOffered} />
+        <BirthdaySheet visible={birthdayOpen} status={birthday} cafes={allCafes} registerRedeem={registerRedeem} onChanged={loadBirthday} onClose={() => setBirthdayOpen(false)} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -671,7 +703,7 @@ function SeasonChip({ season }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, savingsKey, synced, accountHint, onAccountHint, onDismissHint }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, savingsKey, synced, accountHint, onAccountHint, onDismissHint, birthdayBanner, onOpenBirthday }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -683,7 +715,8 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
 
   return (
     <View>
-      {/* Sparat-räknaren (v10). Ligger i hemflikens topp: kortbunten mäter sitt läge själv. */}
+      {/* Födelsedagsveckan (v15) och sparat-räknaren (v10). Ligger i hemflikens topp: kortbunten mäter sitt läge själv. */}
+      {!!birthdayBanner && <BirthdayBanner banner={birthdayBanner} onOpen={onOpenBirthday} />}
       {savings && <SavingsBanner key={"sparat" + (savingsKey || 0)} savings={savings} hold={savingsHold} synced={synced} />}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
@@ -694,6 +727,23 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
       {accountHint && <AccountHint onOpen={onAccountHint} onDismiss={onDismissHint} />}
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
     </View>
+  );
+}
+
+// Födelsedagsveckan (v15): "Grattis på födelsedagen! En present hos Café Linnea · t.o.m. 20 november"
+function BirthdayBanner({ banner, onOpen }) {
+  return (
+    <Pressable onPress={onOpen} accessibilityRole="button" accessibilityHint="Visa dina födelsedagspresenter"
+      style={({ pressed }) => ({ marginTop: 14, paddingVertical: 14, paddingLeft: 14, paddingRight: 12, borderRadius: 24, backgroundColor: T.tertiaryContainer, flexDirection: "row", alignItems: "center", gap: 14, opacity: pressed ? 0.9 : 1 })}>
+      <Shape kind="flower8" size={52} color={PINK} rotate={8}>
+        <Icon name="cake" size={24} color={T.onTertiaryContainer} />
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.title, fontSize: 17, lineHeight: 22, color: T.onTertiaryContainer }}>{banner.title}</Text>
+        <Text style={{ marginTop: 2, fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: T.onTertiaryContainer }}>{banner.text}</Text>
+      </View>
+      <Icon name="chev" size={20} color={T.onTertiaryContainer} />
+    </Pressable>
   );
 }
 

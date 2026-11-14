@@ -6,7 +6,8 @@ import { T, FONT } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import Shape from "./Shape";
 import { PRIVACY_URL, cleanEmail, validEmail, cleanCode, codeReady, resendIn, accountErrorText, linkResultText } from "../lib/account";
-import { sendLoginCode, verifyLoginCode, linkAccount, rotateAccountKey, deleteAccount, accountStatus, endAuthSession } from "../lib/supabase";
+import { sendLoginCode, verifyLoginCode, linkAccount, rotateAccountKey, deleteAccount, accountStatus, endAuthSession, setBirthday } from "../lib/supabase";
+import { MONTHS, MONTHS_SHORT, daysIn, validBirthday, dateText, birthdayRowText } from "../lib/birthday";
 
 // Konto (v14): spara stämplarna med en kod på e-post. Frivilligt — utan konto finns
 // stämplarna bara i telefonen, och det står tydligt här.
@@ -16,7 +17,10 @@ import { sendLoginCode, verifyLoginCode, linkAccount, rotateAccountKey, deleteAc
 //               { type: "deleted" } | { type: "gone" } (utloggad från en annan telefon).
 //               Appen sparar läget och hämtar kort och hjul igen.
 //   onClose
-// Steg: start (e-post) → code → done, och för kopplade telefoner account → confirm (→ code).
+//   birthday        — birthday_status (v15) för födelsedagsraden; birthdayOn = servern har v15
+//   birthdayOffered — något ställe erbjuder födelsedagspresent (nämns i fördelarna)
+// Steg: start (e-post) → code → done, och för kopplade telefoner account → confirm (→ code)
+// och account → birthday (v15: dag och månad, aldrig året).
 const CONFIRM = {
   logout: {
     icon: "logout", title: "Logga ut från den här telefonen?",
@@ -36,7 +40,7 @@ const CONFIRM = {
   },
 };
 
-export default function AccountSheet({ visible, account, onChanged, onClose }) {
+export default function AccountSheet({ visible, account, onChanged, onClose, birthday = null, birthdayOn = false, birthdayOffered = false }) {
   const insets = useSafeAreaInsets();
   const rise = useRef(new Animated.Value(0)).current;
   const mounted = useRef(true);
@@ -51,6 +55,9 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
   const [now, setNow] = useState(Date.now());
   const [verified, setVerified] = useState(false);   // koden godkänd; ett nätfel efteråt försöks igen utan ny kod
   const [result, setResult] = useState(null);
+  const [bMonth, setBMonth] = useState(null);       // födelsedagsvyn (v15)
+  const [bDay, setBDay] = useState(null);
+  const [bNote, setBNote] = useState(null);         // "Sparat. Nästa present …"
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
@@ -58,7 +65,7 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
     setView(account ? "account" : "start");
     setPurpose("login");
     setEmail(account ? account.email : "");
-    setCode(""); setError(null); setNotice(null); setVerified(false); setResult(null); setBusy(false);
+    setCode(""); setError(null); setNotice(null); setVerified(false); setResult(null); setBusy(false); setBNote(null);
     rise.setValue(0);
     Animated.timing(rise, { toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     if (account) {
@@ -136,6 +143,28 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
     await afterVerify();
   };
 
+  // Födelsedagen (v15): öppna väljaren med sparat datum, spara eller ta bort
+  const openBirthday = () => {
+    const b = birthday && birthday.birthday;
+    setBMonth(b ? Number(b.month) : null);
+    setBDay(b ? Number(b.day) : null);
+    setBNote(null);
+    go("birthday");
+  };
+  const saveBirthday = async (remove) => {
+    if (busy) return;
+    if (!remove && !validBirthday(bMonth, bDay)) return;
+    setBusy(true); setError(null);
+    const r = await setBirthday(remove ? null : bMonth, remove ? null : bDay);
+    if (!mounted.current) return;
+    setBusy(false);
+    if (!r.ok) { fail(r.error === "not_linked" ? "not_linked" : r); return; }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setBNote(remove ? "Födelsedagen är borttagen." : "Sparat." + (r.next_gift ? " Nästa present: " + dateText(r.next_gift) + "." : ""));
+    setView("account");
+    if (onChanged) onChanged({ type: "birthday", result: r });
+  };
+
   const logout = () => {
     Haptics.selectionAsync();
     if (onChanged) onChanged({ type: "logout" });
@@ -159,6 +188,7 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
           <Benefit icon="cloudCheck" text="Stämplarna sparas på kontot" />
           <Benefit icon="phone" text="Samma kort på alla dina telefoner" />
           <Benefit icon="mail" text="Inget lösenord – du loggar in med en kod på e-post" />
+          {birthdayOffered && <Benefit icon="cake" text="Present på födelsedagen där det erbjuds" />}
         </View>
         <Field label="E-post" value={email} onChangeText={(s) => { setEmail(s); setError(null); }} onSubmitEditing={sendCode}
           placeholder="namn@exempel.se" keyboardType="email-address" autoComplete="email" textContentType="emailAddress" />
@@ -217,6 +247,7 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
           <Icon name="user" size={22} color={T.ink} />
           <Text style={{ flex: 1, fontFamily: FONT.medium, fontSize: 15, color: T.ink }}>Inloggad som {shown}</Text>
         </View>
+        {birthdayOn && !(birthday && birthday.birthday) && <Button label="Lägg till födelsedag" onPress={openBirthday} tonal />}
         <Button label="Klar" onPress={close} />
       </>
     );
@@ -238,12 +269,60 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
             Dina stämplar sparas på kontot. Logga in med samma e-post på en ny telefon så följer de med.
           </Text>
         </View>
+        {!!bNote && <Note text={bNote} icon="check" />}
         <View style={{ marginTop: 14, borderRadius: 24, backgroundColor: T.surface, borderWidth: 1, borderColor: T.hairline, overflow: "hidden" }}>
+          {birthdayOn && <Action icon="cake" title="Födelsedag" sub={birthdayRowText(birthday)} onPress={openBirthday} />}
           <Action icon="logout" title="Logga ut från den här telefonen" sub="Stämplarna finns kvar på kontot" onPress={() => go("confirm", "logout")} />
           <Action icon="shield" title="Logga ut andra telefoner" sub="Om du tappat bort en telefon" onPress={() => go("confirm", "rotate")} />
           <Action icon="trash" title="Radera konto" danger onPress={() => go("confirm", "delete")} />
         </View>
         <Button label="Stäng" onPress={close} tonal />
+      </>
+    );
+  } else if (view === "birthday") {
+    const max = bMonth ? daysIn(bMonth) : 31;
+    const had = !!(birthday && birthday.birthday);
+    body = (
+      <>
+        <Hero kind="flower8" color="#F2AFC4" icon="cake" iconColor={T.onTertiaryContainer} />
+        <Title>Din födelsedag</Title>
+        <Body>Ställen som erbjuder en födelsedagspresent ger dig den på din födelsedag – den gäller i en vecka. Vi sparar bara dag och månad, inte året.</Body>
+        <Text style={{ marginTop: 18, marginLeft: 4, marginBottom: 8, fontFamily: FONT.semibold, fontSize: 14, color: T.inkSoft }}>Månad</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -20 }} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
+          {MONTHS_SHORT.map((m, i) => {
+            const on = bMonth === i + 1;
+            return (
+              <Pressable key={m} onPress={() => { Haptics.selectionAsync(); setBMonth(i + 1); if (bDay && bDay > daysIn(i + 1)) setBDay(null); }}
+                accessibilityRole="button" accessibilityLabel={MONTHS[i]} accessibilityState={{ selected: on }}
+                style={{ height: 40, minWidth: 52, paddingHorizontal: 12, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: on ? T.primary : T.surface, borderWidth: on ? 0 : 1, borderColor: T.outline }}>
+                <Text style={{ fontFamily: on ? FONT.bold : FONT.medium, fontSize: 15, color: on ? "#FFFFFF" : T.ink }}>{m}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <Text style={{ marginTop: 16, marginLeft: 4, marginBottom: 8, fontFamily: FONT.semibold, fontSize: 14, color: T.inkSoft }}>Dag</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((dd) => {
+            const on = bDay === dd;
+            const off = dd > max;
+            return (
+              <Pressable key={dd} onPress={off ? undefined : () => { Haptics.selectionAsync(); setBDay(dd); }}
+                accessibilityRole="button" accessibilityLabel={String(dd)} accessibilityState={{ selected: on, disabled: off }}
+                style={{ width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: on ? T.primary : off ? "transparent" : T.surface, borderWidth: on || off ? 0 : 1, borderColor: T.hairline }}>
+                <Text style={{ fontFamily: on ? FONT.bold : FONT.medium, fontSize: 15, color: on ? "#FFFFFF" : off ? T.outline : T.ink }}>{dd}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={{ marginTop: 12, fontFamily: FONT.regular, fontSize: 13, lineHeight: 19, color: T.inkSoft, textAlign: "center" }}>
+          Spara den minst 30 dagar i förväg för att få presenten samma år.
+        </Text>
+        {!!error && <ErrorBox text={error} />}
+        <Button label={validBirthday(bMonth, bDay) ? "Spara " + bDay + " " + MONTHS[bMonth - 1] : "Spara"} onPress={() => saveBirthday(false)} busy={busy} disabled={!validBirthday(bMonth, bDay)} />
+        <View style={{ flexDirection: "row", justifyContent: "center", columnGap: 8 }}>
+          {had && <TextButton label="Ta bort födelsedag" onPress={() => saveBirthday(true)} disabled={busy} />}
+          <TextButton label="Avbryt" onPress={() => go("account")} disabled={busy} />
+        </View>
       </>
     );
   } else if (view === "confirm" && conf) {
@@ -307,10 +386,10 @@ const Body = ({ children }) => (
   <Text style={{ marginTop: 8, fontFamily: FONT.regular, fontSize: 16, lineHeight: 23, color: T.inkSoft, textAlign: "center" }}>{children}</Text>
 );
 
-function Note({ text }) {
+function Note({ text, icon = "info" }) {
   return (
     <View style={{ marginTop: 12, padding: 12, borderRadius: 16, backgroundColor: T.tertiaryContainer, flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-      <Icon name="info" size={20} color={T.onTertiaryContainer} />
+      <Icon name={icon} size={20} color={T.onTertiaryContainer} />
       <Text style={{ flex: 1, fontFamily: FONT.medium, fontSize: 14, lineHeight: 20, color: T.onTertiaryContainer }}>{text}</Text>
     </View>
   );
