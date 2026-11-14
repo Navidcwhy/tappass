@@ -5,7 +5,7 @@ import { Icon } from "../lib/icons";
 
 // Meddelanden längst ner (se "Lägen och meddelanden" i designen):
 //   info          — väntetid hos butiken (tonal ruta)
-//   pending-block — belöning väntar → stämpling pausad (butikens färg + "Visa kod")
+//   pending-block — belöning väntar → stämpling pausad (butikens färg + "Lös in")
 //   network       — ingen anslutning (mörk snackbar + "Försök igen")
 //   unknown       — okänd stämpel (felruta)
 //   wheel-miss    — Dagens hjul: ingen vinst + tid till nästa snurr (mörk)
@@ -68,7 +68,7 @@ function Body({ toast, onAction }) {
             accessibilityRole="button"
             style={({ pressed }) => ({ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: t.primary, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}
           >
-            <Text style={{ fontFamily: FONT.semibold, fontSize: 13, color: "#FFFFFF" }}>Visa kod</Text>
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 13, color: "#FFFFFF" }}>Lös in</Text>
           </Pressable>
         )}
       </View>

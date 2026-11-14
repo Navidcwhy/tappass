@@ -16,8 +16,8 @@ const stampSize = (n) => Math.max(18, Math.min(28, Math.floor((Dimensions.get("w
 
 // Ett stämpelkort i butikens egen tonpalett.
 //   pågående     — "2 kvar till …" + stämplar
-//   fullt        — BELÖNING KLAR + "Visa kod" (belöningen är inte sparad än)
-//   sparad       — SPARAD BELÖNING + "Visa kod" (stämpling pausad tills inlöst)
+//   fullt        — BELÖNING KLAR + "Lös in" (belöningen är inte sparad än)
+//   sparad       — SPARAD BELÖNING + "Lös in" (stämpling pausad tills inlöst)
 // Kort med belöning får en holografisk glans; shineOffset (Animated-nod) låter
 // glansen följa skrollningen och stillShine stänger av loopen (Reducera rörelse).
 // quiet = butikens lugna timme som gäller just nu ({ from, to }) → "Lugn timme just nu".
@@ -71,7 +71,7 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
             accessibilityRole="button"
             style={({ pressed }) => ({ marginTop: 18, height: 56, borderRadius: 28, backgroundColor: t.primary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, opacity: pressed ? 0.88 : 1 })}
           >
-            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Visa kod</Text>
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: "#FFFFFF" }}>Lös in</Text>
             <Icon name="arrow" size={20} color="#FFFFFF" strokeWidth={2.2} />
           </Pressable>
         </View>
