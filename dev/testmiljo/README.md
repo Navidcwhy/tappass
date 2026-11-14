@@ -35,7 +35,7 @@ och Playwright svarar på alla RPC-anrop (`mock.cjs`) — ingen trafik når prod
 - `extract-lovable.py` — plockar ut `m.tsx`, `i18n.tsx`, `styles.css` och `merchant-supabase.ts`
   ur en Lovable-diff mot git:s tomma träd (svaret från `get_diff` sparas som fil eftersom det är stort).
 - `shim/router.js` — ersätter TanStack Router (`Route.component` = sidan).
-- `check.cjs` — funktionstest av "Lugna timmar" (43 kontroller: spara, validering, polling med
+- `check.cjs` — funktionstest av "Lugna timmar" och "Senast inlösta" (54 kontroller: spara, validering, polling med
   falsk klocka, bad_session, läsfel, engelska, 360 px). `rec-panel.cjs` — video (768×1024 @2x).
 
 ```bash

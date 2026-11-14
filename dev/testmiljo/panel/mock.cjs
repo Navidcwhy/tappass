@@ -11,6 +11,15 @@ function daily() {
   }
   return out;
 }
+// I går kl. hh:mm svensk tid som ISO-sträng.
+function yesterdayAt(h, m) {
+  const fmt = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" });
+  const today = fmt.format(new Date());
+  const d = new Date(today + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() - 1);
+  const ymd = d.toISOString().slice(0, 10);
+  // Stockholm är UTC+1 vintertid (räcker för testet i november)
+  return new Date(`${ymd}T${String(h - 1).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`).toISOString();
+}
 function clean(hours) {
   if (!Array.isArray(hours) || hours.length > 7) return null;
   const out = [];
@@ -32,6 +41,12 @@ async function mock(page, opts = {}) {
     failQuiet: !!opts.failQuiet,
     badSession: !!opts.badSession,
     calls: [],
+    // Senast inlösta (v9): två i dag, en i går kväll (svensk tid)
+    recent: opts.recent ?? [
+      { redeemed_at: new Date(Date.now() - 3 * 60000).toISOString(), via: "tap", customer_label: "Kund #a41f" },
+      { redeemed_at: new Date(Date.now() - 41 * 60000).toISOString(), via: "code", customer_label: "Kund #7c02" },
+      { redeemed_at: yesterdayAt(21, 10), via: "tap", customer_label: "Kund #e9b4" },
+    ],
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -62,6 +77,9 @@ async function mock(page, opts = {}) {
         state.quiet = c;
         return json({ ok: true, quiet_hours: c, active_now: c.length ? state.active : false }, 450);
       }
+      case "merchant_recent_redemptions":
+        if (opts.badRecentOnly) return json({ ok: false, error: "bad_session" });
+        return json({ ok: true, recent: state.recent });
       case "merchant_logout": return json({ ok: true });
       default: return json({ ok: false, error: "unknown_fn_" + fn });
     }

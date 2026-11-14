@@ -190,6 +190,50 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await ctx.close();
   }
 
+  // 9. Senast inlösta (v9): stämpel/kod, klockslag i svensk tid, "igår", tom lista, ogiltig session
+  {
+    const { ctx, page, errors } = await open(browser);
+    const rec = page.locator("section", { has: page.getByRole("heading", { name: "Senast inlösta", exact: true }) });
+    await rec.getByText("Kund #a41f").waitFor();
+    const rows = await rec.locator("li").allInnerTexts();
+    eq(rows.length, 3, "tre inlösta");
+    ok(/Kund #a41f\s+Stämpeln\s+\d\d:\d\d$/.test(rows[0]), "stämpeln + klockslag: " + rows[0]);
+    ok(/Kund #7c02\s+Kod\s+\d\d:\d\d$/.test(rows[1]), "koden + klockslag: " + rows[1]);
+    ok(/Kund #e9b4\s+Stämpeln\s+igår 21:10$/.test(rows[2]), "igår 21:10: " + rows[2]);
+    ok(await page.getByText("Oftast löser kunden in genom att hålla telefonen mot er TapPass-stämpel.", { exact: false }).isVisible(), "ny hjälptext vid koden");
+    eq(errors, [], "inga sidfel (senast inlösta)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { recent: [] });
+    await page.getByText("Inga inlösta belöningar det senaste dygnet.").waitFor();
+    ok(true, "tom lista");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { badRecentOnly: true });
+    await page.getByText("Du har loggats ut. Logga in igen.").waitFor();
+    ok(true, "bad_session i listan loggar ut");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en" });
+    const rec = page.locator("section", { has: page.getByRole("heading", { name: "Recently redeemed", exact: true }) });
+    await rec.getByText("Kund #e9b4").waitFor();
+    ok(/yesterday 21:10$/.test((await rec.locator("li").allInnerTexts())[2]), "engelska: yesterday");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800, recent: [{ redeemed_at: new Date().toISOString(), via: "tap", customer_label: "Kund #a41f med ett väldigt långt namn som inte får tränga ut tiden" }] });
+    const rec = page.locator("section", { has: page.getByRole("heading", { name: "Senast inlösta", exact: true }) });
+    await rec.locator("li").first().waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "ingen sidledsskroll med långt namn (" + sw + ")");
+    const time = await rec.locator("li").first().locator("span").last().boundingBox();
+    ok(time && time.x + time.width <= 360, "klockslaget syns helt");
+    await ctx.close();
+  }
+
   await browser.close();
   console.log("Panel OK:", passed, "kontroller");
 })().catch((e) => { console.error("FEL:", e.message); process.exit(1); });
