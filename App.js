@@ -28,6 +28,7 @@ import RewardSheet from "./src/components/RewardSheet";
 import PlaceSheet from "./src/components/PlaceSheet";
 import CafeAvatar from "./src/components/CafeAvatar";
 import { openState, openText } from "./src/lib/hours";
+import { placesWithChains, storeFields, metaText, searchText } from "./src/lib/chains";
 import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -73,6 +74,11 @@ function normalizeCafe(c) {
     logoVersion: Number(c.logo_version) || 0,
     birthdayText: c.birthday_text || "",                              // v15: födelsedagspresent (tom = erbjuds inte)
     birthdayValue: krValue(c.birthday_value_kr),
+    // v18: kedjor – kedjan (isChain) äger kortet, ställena har chainId = kedjans uuid
+    uuid: c.id || null,
+    chainId: c.chain_id || null,
+    isChain: !!c.is_chain,
+    ownCard: !!c.own_card,
   };
 }
 
@@ -88,6 +94,7 @@ function normalizeCard(row) {
     bonusExpiresAt: bonus_expires_at || null,   // Dagens hjul: aktiv dubbelstämpel
     ...savingsFields(row),    // v10: sparat-räknaren (inlösta belöningar och deras värde)
     ...visitsFields(row),     // v11: besök senaste 12 månaderna → stamgästnivå
+    stores: Array.isArray(row.stores) ? row.stores.map(storeFields) : null,   // v18: kedjans ställen
   };
 }
 
@@ -179,6 +186,8 @@ export default function App() {
   const loadInviteRef = useRef(null);
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
+  const cafesRef = useRef(allCafes);   // v18: kedjans ställen till kortet efter ett tapp
+  useEffect(() => { cafesRef.current = allCafes; }, [allCafes]);
   // Första stämpeln någonsin på telefonen (välkomstfirande). true tills flaggan lästs,
   // så att ett tidigt tapp aldrig ger ett felaktigt "första".
   const firstStampDoneRef = useRef(true);
@@ -242,7 +251,7 @@ export default function App() {
       // Hjulets läge sätter loadWheel själv (med ordningsskydd).
       const [cafes, rows] = await Promise.all([loadCafes(), loadWallet(), loadWheel()]);
       syncedRef.current = true;
-      if (cafes) setAllCafes(cafes.map(normalizeCafe));
+      if (cafes) setAllCafes(placesWithChains(cafes.map(normalizeCafe)));
       if (rows) setWallet(walletFromRows(rows));
       setSynced(true);
     })();
@@ -476,6 +485,9 @@ export default function App() {
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
     // Sparat-räknaren följer med; första stämpeln i dag hos stället är ett nytt besök (v11).
     const before = walletRef.current[card.slug];
+    // v18: tappsvaret saknar kedjans ställen – behåll kortets, annars listans
+    const listed = cafesRef.current.find((c) => c.slug === card.slug);
+    card.stores = (before && before.stores) || (listed && listed.stores) || null;
     const levelUp = before && before.hasLevels ? crossedLevel(before.visits, afterTap(card, before).visits) : null;
     setWallet((prev) => ({ ...prev, [card.slug]: afterTap(keepSavings(card, prev[card.slug]), prev[card.slug]) }));
     if (result.bonus_applied) loadWheel();
@@ -495,7 +507,8 @@ export default function App() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
-      showStamp({ ...card, added, first, quiet: !!result.quiet_applied, levelUp });
+      showStamp({ ...card, added, first, quiet: !!result.quiet_applied, levelUp,
+        place: result.place && result.place.name ? result.place.name : null });   // v18: kedjans ställe
     }
   }, [showToast, showStamp, loadWheel, refreshWallet]);
 
@@ -947,7 +960,7 @@ function PlacesTab({ cafes, wallet, quietKey, onInvite }) {
   const query = q.trim().toLowerCase();
   const list = cafes.filter((c) =>
     (!type || c.type === type) &&
-    (!query || [c.name, c.area, c.type].some((v) => String(v || "").toLowerCase().includes(query)))
+    (!query || searchText(c).includes(query))   // v18: även kedjans ställen och områden
   );
 
   const tip = () => {
@@ -1031,7 +1044,7 @@ function PlacesTab({ cafes, wallet, quietKey, onInvite }) {
 
 function PlaceCard({ cafe, card, quiet, onPress }) {
   const t = toneFor(cafe.ink);
-  const meta = [cafe.type, cafe.area].filter(Boolean).join(" · ");
+  const meta = metaText(cafe);   // v18: "Kafé · Gäller på 3 ställen" för en kedja
   const needed = cafe.needed || card?.needed || 0;
   const progress = card
     ? (card.pendingReward || card.stamps >= card.needed ? "Klar" : card.stamps + "/" + card.needed)

@@ -7,6 +7,7 @@ import { Icon } from "../lib/icons";
 import { openState, openText, hoursLines, siteLabel, instagramUrl } from "../lib/hours";
 import { quietSummary } from "../lib/quiet";
 import { levelFor, progressText } from "../lib/levels";
+import { metaText, chainText } from "../lib/chains";
 import CafeAvatar from "./CafeAvatar";
 import LevelPill from "./LevelPill";
 
@@ -38,7 +39,8 @@ export default function PlaceSheet({ cafe, card, onClose }) {
   if (!cafe || !c) return null;
   const t = toneFor(c.ink);
   const open = openState(c.openingHours);
-  const meta = [c.type, c.area].filter(Boolean).join(" · ");
+  const meta = metaText(c);   // v18: en kedja visar "Gäller på N ställen"
+  const stores = (c.stores && c.stores.length ? c.stores : (card && card.stores)) || [];
   const hours = hoursLines(c.openingHours);
   const quiet = quietSummary(c.quietHours);
   const visits = card && card.hasLevels ? card.visits : 0;
@@ -87,6 +89,22 @@ export default function PlaceSheet({ cafe, card, onClose }) {
               {!!c.website && <Row icon="globe" title={siteLabel(c.website)} onPress={() => go(c.website)} />}
               {!!c.instagram && <Row icon="at" title={"@" + c.instagram} sub="Instagram" onPress={() => go(instagramUrl(c.instagram))} />}
             </View>
+
+            {/* v18: kedjans ställen – kortet gäller på alla */}
+            {stores.length > 0 && (
+              <>
+                <Text accessibilityRole="header" style={{ marginTop: 18, marginLeft: 4, fontFamily: FONT.semibold, fontSize: 14, color: T.inkSoft }}>
+                  {chainText(stores.length)}
+                </Text>
+                <View style={{ marginTop: 8, borderRadius: 24, backgroundColor: T.surface, borderWidth: 1, borderColor: T.hairline, overflow: "hidden" }}>
+                  {stores.map((s) => {
+                    const o = openState(s.openingHours);
+                    const sub = [s.address || s.area, o ? openText(o) : null].filter(Boolean).join("\n");
+                    return <Row key={s.slug} icon="pin" title={s.name} sub={sub || null} onPress={s.address ? () => go(mapsUrl(s)) : null} />;
+                  })}
+                </View>
+              </>
+            )}
 
             {!!card && (
               <View style={{ marginTop: 14, padding: 16, borderRadius: 24, backgroundColor: t.container, gap: 6 }}>
