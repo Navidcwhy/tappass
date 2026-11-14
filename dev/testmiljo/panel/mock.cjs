@@ -100,6 +100,9 @@ async function mock(page, opts = {}) {
     birthday: opts.birthday ?? { text: null, value_kr: null, redeemed_30d: 0, redeemed_total: 0, upcoming_30d: 3 },
     failBirthday: !!opts.failBirthday,
     rejectBirthday: opts.rejectBirthday ?? null,
+    // v16: bjud in en vän
+    invite: opts.invite ?? { friends_30d: 4, friends_total: 11, stamps_30d: 16 },
+    failInvite: !!opts.failInvite,
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -117,7 +120,7 @@ async function mock(page, opts = {}) {
       case "merchant_pending_list":
         return json({ ok: true, pending: [{ code: "482913", saved_at: new Date(Date.now() - 25 * 60000).toISOString(), customer_label: "Kund #A41F", reward: "Valfri kaka" }] });
       case "merchant_campaign_stats":
-        return json({ ok: true, bonus_stamps_30d: 4, bonus_stamps_total: 4, active_bonuses: 1, new_customers_30d: 2, carried_over_30d: 1 });
+        return json({ ok: true, bonus_stamps_30d: 4, bonus_stamps_total: 4, active_bonuses: 1, new_customers_30d: 2, carried_over_30d: 1, ...(opts.campaign || {}) });
       case "merchant_get_settings":
         return json({ ok: true, stamp_cooldown_seconds: 60, cooldown_min_seconds: 10, cooldown_max_seconds: 86400, login_name: "miyabi" });
       case "merchant_get_quiet_hours":
@@ -212,6 +215,9 @@ async function mock(page, opts = {}) {
         state.profile = { ...state.profile, logo: { mime: body.p_mime, data: body.p_data }, logo_version: state.profile.logo_version + 1 };
         return json({ ok: true, logo_version: state.profile.logo_version }, 400);
       }
+      case "merchant_invite_stats":
+        if (state.failInvite) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "Could not find the function public.merchant_invite_stats(p_token)" }) });
+        return json({ ok: true, ...state.invite });
       case "merchant_get_birthday":
         if (state.failBirthday) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "Could not find the function public.merchant_get_birthday(p_token)" }) });
         return json({ ok: true, ...state.birthday });

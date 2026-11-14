@@ -720,6 +720,43 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await ctx.close();
   }
 
+  // 16. Kampanjstämplar: Bjud in en vän (v16)
+  {
+    const { ctx, page, errors } = await open(browser);
+    const camp = secOf(page, "Kampanjstämplar");
+    await camp.getByText("Nya kunder via inbjudan · 30 dagar").waitFor();
+    ok(true, "inbjudan: femte siffran");
+    ok(await camp.getByText("Bjud in en vän", { exact: false }).first().isVisible(), "hjälptexten nämner Bjud in en vän");
+    ok(await camp.getByText("(totalt 11)", { exact: false }).isVisible(), "förklaringen med totalt");
+    const cards = await camp.locator("div").filter({ hasText: /^4$/ }).count();
+    ok(cards > 0, "friends_30d = 4 visas");
+    eq(errors, [], "inga sidfel (inbjudan)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await open(browser, { failInvite: true });
+    const camp = secOf(page, "Kampanjstämplar");
+    await camp.getByText("Överförda", { exact: false }).first().waitFor();
+    await page.waitForTimeout(600);
+    ok(!(await camp.getByText("Nya kunder via inbjudan · 30 dagar").isVisible()), "utan v16: ingen femte siffra");
+    ok(!(await camp.getByText("(totalt", { exact: false }).isVisible()), "utan v16: ingen extra mening");
+    ok(!(await page.getByText("Kunde inte hämta kampanjsiffrorna just nu.").isVisible()), "inget felmeddelande");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800 });
+    await secOf(page, "Kampanjstämplar").getByText("Nya kunder via inbjudan · 30 dagar").waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "inbjudan: ingen sidledsskroll vid 360 px (" + sw + ")");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en" });
+    await secOf(page, "Campaign stamps").getByText("New customers via invite · 30 days").waitFor();
+    ok(true, "engelska: inbjudan");
+    await ctx.close();
+  }
+
   await browser.close();
   console.log("Panel OK:", passed, "kontroller");
 })().catch((e) => { console.error("FEL:", e.message); process.exit(1); });

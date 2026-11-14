@@ -86,11 +86,27 @@ export async function redeemBirthdayByTap(slug, token) {
   giftState[slug] = "redeemed"; giftAt[slug] = new Date().toISOString();
   return { ok: true, reward: slug === "miyabi" ? "Två makirullar" : "En kaka på huset", redeemed_at: giftAt[slug] };
 }
+// ?s=bjudin: inbjudaren (Anna) — en vän har stämplat, en väntar. ?s=bjudin2: den nya kunden
+// anger en väns kod och stämplar första gången (välkomstbonus 1 + 2).
+const BJUDIN = S === "bjudin", BJUDIN2 = S === "bjudin2";
+const plus7 = new Date(Date.now() + 7 * 86400000).toISOString();
+let inviteUnseen = BJUDIN ? [{ cafe_slug: "linnea", cafe_name: "Café Linnea", rewarded_at: new Date().toISOString() }] : [];
+let inviteEntered = null;
+export async function inviteStatus() {
+  await delay(60);
+  if (!BJUDIN && !BJUDIN2) return { ok: true, unavailable: true };
+  if (BJUDIN) return { ok: true, code: "K7M3QF", can_redeem: false, redeem_until: null, entered: null, friends: 2, rewarded: 1, unseen: inviteUnseen };
+  return { ok: true, code: inviteEntered ? "R4N8TP" : null, can_redeem: !inviteEntered, redeem_until: plus7, entered: inviteEntered, friends: 0, rewarded: 0, unseen: [] };
+}
+export async function getInviteCode() { await delay(250); const st = await inviteStatus(); return { ...st, code: st.code || (BJUDIN2 ? "R4N8TP" : "K7M3QF") }; }
+export async function redeemInvite() { await delay(500); inviteEntered = { status: "pending", window_until: plus7 }; return { ok: true, status: "pending", until: plus7 }; }
+export async function ackInvites() { inviteUnseen = []; return { ok: true }; }
 export const supabase = {};
 export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
 export async function tapToken() {
   await delay(D);
+  if (S === "bjudin2") { inviteEntered = { status: "rewarded", cafe_slug: "linnea", cafe_name: "Café Linnea" }; return { ok: true, cafe: LINNEA, stamps: 3, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
   if (S === "tiers") { tierStamps += 1; return { ok: true, cafe: LINNEA_T, stamps: tierStamps, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
   if (S === "niva") return { ok: true, cafe: BRYGGAN_V, stamps: 3, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
   if (S === "full") return { ok: true, cafe: MIYABI, stamps: 7, complete: true, stamps_added: 2, bonus_applied: true, carry_over: 1 };
@@ -144,6 +160,12 @@ export async function redeemByTap(slug, token) {
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
+  if (S === "bjudin2") return inviteEntered && inviteEntered.status === "rewarded" ? [{ cafe: LINNEA, stamps: 3, pending: false, bonus_expires_at: null }] : [];
+  if (S === "bjudin") return [
+    { cafe: LINNEA, stamps: 6, pending: false, bonus_expires_at: null },
+    { cafe: MIYABI, stamps: 3, pending: false, bonus_expires_at: null },
+    { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },
+  ];
   if (S === "fodelsedag") return [
     { cafe: LINNEA_B, stamps: 4, pending: false, bonus_expires_at: null },
     { cafe: MIYABI_B, stamps: 3, pending: false, bonus_expires_at: null },

@@ -17,6 +17,7 @@ jest.mock("../src/lib/nfc", () => ({
 jest.mock("../src/lib/useNfcStatus", () => ({ useNfcStatus: () => ({ supported: true, enabled: true }) }));
 jest.mock("../src/lib/cache", () => ({ readCache: jest.fn(() => Promise.resolve(null)), writeCache: jest.fn() }));
 jest.mock("../src/lib/prefs", () => ({
+  inviteHintDismissed: jest.fn(() => Promise.resolve(true)), dismissInviteHint: jest.fn(),
   getAccount: jest.fn(() => Promise.resolve(null)), setAccount: jest.fn(), clearAccount: jest.fn(),
   accountHintDismissed: jest.fn(() => Promise.resolve(true)), dismissAccountHint: jest.fn(),
   hasOnboarded: jest.fn(() => Promise.resolve(true)), markOnboarded: jest.fn(),
@@ -24,6 +25,8 @@ jest.mock("../src/lib/prefs", () => ({
   hasFirstStamp: jest.fn(() => Promise.resolve(true)), markFirstStamp: jest.fn(),
 }));
 jest.mock("../src/lib/supabase", () => ({
+  inviteStatus: jest.fn(() => Promise.resolve({ ok: true, unavailable: true })), ackInvites: jest.fn(() => Promise.resolve({ ok: true })),
+  getInviteCode: jest.fn(), redeemInvite: jest.fn(),
   birthdayStatus: jest.fn(), setBirthday: jest.fn(), claimBirthday: jest.fn(), getBirthdayCode: jest.fn(), redeemBirthdayByTap: jest.fn(),
   getAuthMethods: jest.fn(() => Promise.resolve({ email: true, apple: false, google: false })),
   accountStatus: jest.fn(() => Promise.resolve({ ok: true, linked: true })), newDeviceId: jest.fn(() => Promise.resolve("d_ny")),

@@ -2,7 +2,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "node:fs";
 const upto = process.argv[2], fns = process.argv[3].split(",");
-const chain = ["v6_dagens_hjul", "v7_buggfixar", "v8_lugna_timmar", "v9_inlosen_tapp", "v10_fler_beloningar", "v11_stamgaster", "v12_insikter", "v13_profil", "v14_konto", "v15_fodelsedag"];
+const chain = ["v6_dagens_hjul", "v7_buggfixar", "v8_lugna_timmar", "v9_inlosen_tapp", "v10_fler_beloningar", "v11_stamgaster", "v12_insikter", "v13_profil", "v14_konto", "v15_fodelsedag", "v16_bjud_in"];
 const db = new PGlite();
 await db.exec(readFileSync("base.sql", "utf8"));
 await db.exec(`create schema if not exists auth; create table if not exists auth.users (id uuid primary key, email text);
