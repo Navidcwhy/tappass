@@ -106,6 +106,18 @@ test("arket: din kod delas, och en ny kund anger en väns kod", async () => {
   expect(onChanged).toHaveBeenCalledWith({ redeemed: expect.objectContaining({ status: "pending" }) });
 });
 
+test("arket: reglerna (sponsor och länk till användarvillkoren)", async () => {
+  const { Linking } = require("react-native");
+  const open = jest.spyOn(Linking, "openURL").mockResolvedValue(true);
+  sb.getInviteCode.mockResolvedValue(NEW);
+  const tree = await mount(<InviteSheet visible status={NEW} onChanged={jest.fn()} onClose={jest.fn()} />);
+  await flush();
+  expect(text(tree)).toContain("Bjud in en vän anordnas av Folde.AI AB – Apple och Google är inte inblandade.");
+  await press(tree, "Fullständiga regler");
+  expect(open).toHaveBeenCalledWith("https://tappass.se/anvandarvillkor");
+  expect(iv.TERMS_URL).toBe("https://tappass.se/anvandarvillkor");
+});
+
 test("arket: angiven kod och kund som inte är ny", async () => {
   sb.getInviteCode.mockResolvedValue({ ...NEW, can_redeem: false, entered: { status: "rewarded", cafe_name: "Miyabi" }, friends: 2, rewarded: 1 });
   const st = { ...NEW, can_redeem: false, entered: { status: "rewarded", cafe_name: "Miyabi" }, friends: 2, rewarded: 1 };
