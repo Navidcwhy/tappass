@@ -5,7 +5,9 @@ import { Icon } from "../lib/icons";
 import { expiryText, isActiveUntil } from "../lib/wheel";
 import { clockText } from "../lib/quiet";
 import { optionFor, tierReady } from "../lib/tiers";
+import { levelFor } from "../lib/levels";
 import Shape from "./Shape";
+import LevelPill from "./LevelPill";
 import StampRow from "./StampRow";
 import Shine from "./Shine";
 
@@ -41,6 +43,7 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
   // En mindre belöning heter som när den sparades (pendingName) — samma som personalen ser,
   // även om butiken bytt namn på eller tagit bort nivån efteråt.
   const smaller = pending && c.pendingTier != null && c.pendingTier < needed;
+  const level = c.hasLevels ? levelFor(c.visits) : null;   // v11: stamgästnivå hos stället
   const title = pending ? (smaller && c.pendingName ? c.pendingName : optionFor(c, c.pendingTier).title) : c.reward;
 
   return (
@@ -52,7 +55,10 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
           <Text style={{ fontFamily: FONT.bold, fontSize: 18, color: "#FFFFFF" }}>{initial}</Text>
         </Shape>
         <View style={{ flex: 1 }}>
-          <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 20, lineHeight: 25, color: t.onContainer }}>{c.name}</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONT.title, fontSize: 20, lineHeight: 25, color: t.onContainer }}>{c.name}</Text>
+            {level && <LevelPill level={level} place={c.name} />}
+          </View>
           {!!meta && <Text numberOfLines={1} style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: t.muted }}>{meta}</Text>}
         </View>
         {!reward && <Text style={{ fontFamily: FONT.bold, fontSize: 16, color: t.primary }}>{stamps}/{needed}</Text>}

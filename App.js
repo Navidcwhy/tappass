@@ -22,6 +22,7 @@ import { seasonFor } from "./src/lib/season";
 import { quietNow, quietParts, quietSummary } from "./src/lib/quiet";
 import { cleanTiers, crossedTier, krValue } from "./src/lib/tiers";
 import { savingsFields, keepSavings, walletSavings } from "./src/lib/savings";
+import { visitsFields, afterTap, crossedLevel, levelFor, progressText } from "./src/lib/levels";
 import RewardSheet from "./src/components/RewardSheet";
 import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
@@ -68,6 +69,7 @@ function normalizeCard(row) {
     pendingName: pending && pending_reward ? String(pending_reward) : null,       // v10: dess namn när den sparades
     bonusExpiresAt: bonus_expires_at || null,   // Dagens hjul: aktiv dubbelstämpel
     ...savingsFields(row),    // v10: sparat-räknaren (inlösta belöningar och deras värde)
+    ...visitsFields(row),     // v11: besök senaste 12 månaderna → stamgästnivå
   };
 }
 
@@ -280,7 +282,7 @@ export default function App() {
     if (stampTimer.current) clearTimeout(stampTimer.current);
     setStampCard(card);
     // Längre visning när mer händer: välkomstfirandet och dubbelstämpelns två nedslag.
-    const ms = card.first ? 6500 : card.added === 2 ? 5200 : 4500;
+    const ms = card.first ? 6500 : card.levelUp ? 6200 : card.added === 2 ? 5200 : 4500;
     stampTimer.current = setTimeout(() => { stampTimer.current = null; setStampCard(null); }, ms);
   }, []);
 
@@ -334,7 +336,10 @@ export default function App() {
     if (!firstStampDoneRef.current) { firstStampDoneRef.current = true; markFirstStamp(); }
     // En lyckad stämpel förbrukar alltid en aktiv dubbelstämpel hos butiken.
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
-    setWallet((prev) => ({ ...prev, [card.slug]: keepSavings(card, prev[card.slug]) }));
+    // Sparat-räknaren följer med; första stämpeln i dag hos stället är ett nytt besök (v11).
+    const before = walletRef.current[card.slug];
+    const levelUp = before && before.hasLevels ? crossedLevel(before.visits, afterTap(card, before).visits) : null;
+    setWallet((prev) => ({ ...prev, [card.slug]: afterTap(keepSavings(card, prev[card.slug]), prev[card.slug]) }));
     if (result.bonus_applied) loadWheel();
 
     const added = result.stamps_added === 2 ? 2 : 1;
@@ -348,7 +353,7 @@ export default function App() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
-      showStamp({ ...card, added, first, quiet: !!result.quiet_applied });
+      showStamp({ ...card, added, first, quiet: !!result.quiet_applied, levelUp });
     }
   }, [showToast, showStamp, loadWheel]);
 
@@ -727,6 +732,7 @@ function PlaceCard({ cafe, card, quiet }) {
     ? (card.pendingReward || card.stamps >= card.needed ? "Klar" : card.stamps + "/" + card.needed)
     : null;
   const bonusOn = !!card && isActiveUntil(card.bonusExpiresAt);
+  const visits = card && card.hasLevels ? card.visits : 0;   // v11: stamgästnivå
   const schedule = quietSummary(cafe.quietHours);
   const periods = quietParts(cafe.quietHours);
   return (
@@ -743,6 +749,12 @@ function PlaceCard({ cafe, card, quiet }) {
             {cafe.rewardShort || cafe.reward}{needed ? " efter " + needed + " stämplar" : ""}
           </Text>
         </View>
+        {visits > 0 && (
+          <View accessible accessibilityLabel={progressText(visits) + " (besök senaste 12 månaderna)"} style={{ marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Icon name="award" size={16} color={levelFor(visits) ? levelFor(visits).accent : t.onContainer} />
+            <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: t.muted }}>{progressText(visits)}</Text>
+          </View>
+        )}
         {!!schedule && (
           <View accessible accessibilityLabel={"Lugna timmar " + schedule + ": varje stämpel ger 2"} style={{ marginTop: 4, flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
             <Icon name="timer" size={16} color={t.onContainer} />
