@@ -111,7 +111,7 @@ test("Lös in: sparar belöningen och väntar sedan på stämpeln", async () => 
   expect(text(tree)).toContain("Personalen håller butikens stämpel mot telefonen");
   await press(tree, "Lös in");
   await until(() => text(tree).includes(WAIT), "stämpelskärmen");
-  expect(sb.saveReward).toHaveBeenCalledWith("miyabi");
+  expect(sb.saveReward).toHaveBeenCalledWith("miyabi", undefined);   // butik utan flera belöningar: ingen nivå
   if (IOS) expect(nfc.readToken).toHaveBeenCalledWith({ alertMessage: "Håll iPhonen mot Miyabis stämpel" });
   else expect(nfc.readToken).not.toHaveBeenCalled();
 });

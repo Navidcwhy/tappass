@@ -10,6 +10,11 @@ const RAMEN = { slug: "ramenkai", name: "Ramen Kai", type: "Ramen-bar", area: "K
 const NONNA = { slug: "nonna", name: "Nonna Pizza", type: "Pizzeria", area: "Hornstull", ink_color: "#2F4B7C", reward_text: "En pizza på huset", reward_short: "Gratis pizza", stamps_needed: 6, city: "Stockholm" };
 const BLOM = { slug: "blom", name: "Blom & Böna", type: "Kafé", area: "Östermalm", ink_color: "#6A4A86", reward_text: "En latte på huset", reward_short: "Gratis latte", stamps_needed: 8, city: "Stockholm" };
 const FIKA = { slug: "fika", name: "Fikafabriken", type: "Konditori", area: "Vasastan", ink_color: "#2E6B4F", reward_text: "En bakelse på huset", reward_short: "Gratis bakelse", stamps_needed: 5, city: "Stockholm" };
+// ?s=tiers: Café Linnea med mindre belöningar (v10): kanelbulle vid 3, kaka vid 5, kaffe vid 10.
+const TIERS = [{ at: 3, text: "Kanelbulle" }, { at: 5, text: "Valfri kaka" }];
+const LINNEA_T = { ...LINNEA, stamps_needed: 10, reward_tiers: TIERS };
+let tierStamps = 4;
+let savedTier = null;
 const CITIES = [{ city: "Stockholm", places: 3 }, { city: "Göteborg", places: 1 }];
 const OFFERS = [{ cafe: MIYABI, stamps: 5, is_new: false }, { cafe: BRYGGAN, stamps: 2, is_new: false }, { cafe: LINNEA, stamps: 0, is_new: true }];
 let claimed = false;
@@ -20,6 +25,7 @@ export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
 export async function tapToken() {
   await delay(D);
+  if (S === "tiers") { tierStamps += 1; return { ok: true, cafe: LINNEA_T, stamps: tierStamps, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
   if (S === "full") return { ok: true, cafe: MIYABI, stamps: 7, complete: true, stamps_added: 2, bonus_applied: true, carry_over: 1 };
   if (S === "plus1") return { ok: true, cafe: MIYABI, stamps: 4, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
   if (S === "last") return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
@@ -30,17 +36,30 @@ export async function tapToken() {
 // ?s=tap: fullt kort (7/6) som löses in med butikens stämpel (v9). Fel stämpel = Bryggan.
 let savedCode = null;
 let redeemedByTap = false;
-export const saveReward = async () => { await delay(S === "tap" ? 350 : 0); savedCode = "305174"; return { ok: true, code: "305174" }; };
+export const saveReward = async (slug, at) => {
+  await delay(S === "tap" || S === "tiers" ? 350 : 0);
+  savedCode = "305174";
+  if (S === "tiers") { savedTier = at ?? 10; return { ok: true, code: "305174", tier_at: savedTier }; }
+  return { ok: true, code: "305174" };
+};
+export async function cancelSavedReward() { await delay(250); savedCode = null; savedTier = null; return { ok: true, stamps: tierStamps }; }
 let codeCalls = 0;
 export const getCurrentSavedCode = async () => {
   codeCalls++;
   if (S === "tap") return { ok: true, code: redeemedByTap ? null : savedCode };
+  if (S === "tiers") return { ok: true, code: savedCode, tierAt: savedCode ? savedTier : null };
   return S === "redeem" && codeCalls > 2 ? { ok: true, code: null } : { ok: true, code: "305174" };
 };
 export async function redeemByTap(slug, token) {
   await delay(500);
   const t = String(token || "").toLowerCase();
   if (t.startsWith("bryggan")) return { ok: false, error: "wrong_tag", expected: "Miyabi", got: "Bryggans Bageri" };
+  if (S === "tiers") {
+    if (!t.startsWith("linnea")) return { ok: false, error: "wrong_tag", expected: "Café Linnea", got: "Miyabi" };
+    const carry = Math.max(0, tierStamps - (savedTier ?? 10));
+    tierStamps = carry; savedCode = null;
+    return { ok: true, carry_over: carry, stamps: carry, tier_at: savedTier };
+  }
   if (!t.startsWith("miyabi")) return { ok: false, error: "unknown_tag", expected: "Miyabi" };
   redeemedByTap = true;
   savedCode = null;
@@ -49,6 +68,10 @@ export async function redeemByTap(slug, token) {
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
+  if (S === "tiers") return [
+    { cafe: LINNEA_T, stamps: tierStamps, pending: !!savedCode, pending_tier: savedCode ? savedTier : null, bonus_expires_at: null },
+    { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },
+  ];
   if (S === "stack") return [
     { cafe: MIYABI, stamps: 6, pending: false, bonus_expires_at: null },
     { cafe: LINNEA, stamps: 8, pending: true, bonus_expires_at: null },
