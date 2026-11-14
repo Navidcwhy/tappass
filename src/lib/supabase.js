@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { cleanEmail, cleanCode } from "./account";
 
 const SUPABASE_URL = "https://yaizagzyjfxvbqpknlsj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Oy72AtSsEQMTHeebp1TmLg_mceB0gf6";
@@ -10,16 +11,18 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 const DEVICE_KEY = "tappass.device_id";
 let deviceIdPromise = null;
+const makeId = () => "d_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 
 // Ett enda id per installation. Alla samtidiga anrop väntar på samma läsning —
 // annars kan första start (t.ex. via en tagglänk) skapa flera id:n, och den
 // första stämpeln hamnar på ett id som appen sedan glömmer.
+// Med konto (v14) byts id:t mot kontots nyckel (setDeviceId).
 export function getDeviceId() {
   if (!deviceIdPromise) {
     deviceIdPromise = (async () => {
       let id = await AsyncStorage.getItem(DEVICE_KEY);
       if (!id) {
-        id = "d_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+        id = makeId();
         await AsyncStorage.setItem(DEVICE_KEY, id);
       }
       return id;
@@ -30,6 +33,15 @@ export function getDeviceId() {
   }
   return deviceIdPromise;
 }
+
+// Byt telefonens id: kontots nyckel efter inloggning, eller ett nytt slumpat id när
+// kunden loggar ut eller raderar kontot (telefonen börjar då om med tomma kort).
+export async function setDeviceId(id) {
+  await AsyncStorage.setItem(DEVICE_KEY, id);
+  deviceIdPromise = Promise.resolve(id);
+  return id;
+}
+export const newDeviceId = () => setDeviceId(makeId());
 
 // Returns the RPC's own jsonb ({ ok, error: "unknown_tag" | "pending_reward" |
 // "cooldown" | ... }). Transport/RPC failures are normalized to error: "network"
@@ -164,6 +176,134 @@ export async function spinWheel(city) {
 export async function claimWheelPrize(spinId, cafeSlug) {
   const device_id = await getDeviceId();
   return wheelRpc("claim_wheel_prize", { p_device_id: device_id, p_spin_id: spinId, p_cafe_slug: cafeSlug });
+}
+
+// ── Konto (v14) ──────────────────────────────────────────────────────────
+// Inloggningen sker i en egen klient: bara account_*-anropen går som inloggad, alla
+// andra anrop går som förut. Sessionen sparas inte — den behövs bara medan telefonen
+// kopplas, nyckeln byts eller kontot raderas, och avslutas direkt efteråt.
+let authClient = null;
+const auth = () => {
+  if (!authClient) {
+    authClient = createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "tappass-konto" },
+    });
+  }
+  return authClient;
+};
+
+export function endAuthSession() {
+  if (!authClient) return Promise.resolve();
+  return authClient.auth.signOut({ scope: "local" }).then(() => {}, () => {});
+}
+
+// Supabase Auth-fel → { ok: false, error: "rate_limit" (+ retryAfter) | "invalid_email" |
+// "bad_code" | "not_found" | "disabled" | "network" }. notFound: inloggning för att
+// bekräfta (inget nytt konto får skapas) — en okänd adress är då "not_found".
+function authError(error, notFound) {
+  const code = (error && error.code) || "";
+  if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit" || (error && error.status === 429)) {
+    const m = /(\d+)\s*sec/i.exec((error && error.message) || "");
+    return { ok: false, error: "rate_limit", retryAfter: m ? Number(m[1]) : null };
+  }
+  if (code === "email_address_invalid" || code === "validation_failed") return { ok: false, error: "invalid_email" };
+  if (code === "otp_expired") return { ok: false, error: "bad_code" };
+  if (notFound && (code === "otp_disabled" || code === "signup_disabled" || code === "user_not_found")) return { ok: false, error: "not_found" };
+  if (["otp_disabled", "signup_disabled", "email_provider_disabled", "email_address_not_authorized"].includes(code)) return { ok: false, error: "disabled" };
+  return { ok: false, error: "network" };
+}
+
+// Vilka inloggningssätt appen visar ({ email, apple, google }). null = okänt (nätfel);
+// en server före v14 svarar att inget är påslaget.
+export async function getAuthMethods() {
+  try {
+    const { data, error } = await supabase.rpc("auth_methods");
+    if (error) return error.code === "PGRST202" ? { email: false, apple: false, google: false } : null;
+    if (!data || typeof data !== "object") return null;
+    return { email: !!data.email, apple: !!data.apple, google: !!data.google };
+  } catch {
+    return null;
+  }
+}
+
+// Mejla en inloggningskod. create: false = bara befintliga konton (bekräfta att det är
+// kunden innan andra telefoner loggas ut eller kontot raderas).
+export async function sendLoginCode(email, { create = true } = {}) {
+  try {
+    const { error } = await auth().auth.signInWithOtp({ email: cleanEmail(email), options: { shouldCreateUser: create } });
+    return error ? authError(error, !create) : { ok: true };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+export async function verifyLoginCode(email, code) {
+  try {
+    const { data, error } = await auth().auth.verifyOtp({ email: cleanEmail(email), token: cleanCode(code), type: "email" });
+    if (error) return authError(error, false);
+    return data && data.session ? { ok: true } : { ok: false, error: "bad_code" };
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// Koppla telefonen till kontot (efter verifyLoginCode). Svaret innehåller kontots
+// nyckel, som blir telefonens id: { ok, device_id, created, merged, moved_stamps, already? }
+// eller { ok: false, error: "other_account" | "not_signed_in" | "network" … }.
+// Vid nätfel finns sessionen kvar, så att "Försök igen" fungerar utan ny kod.
+export async function linkAccount() {
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await auth().rpc("account_link", { p_device_id: device_id });
+    if (error || !data || typeof data !== "object") return { ok: false, error: error && error.code === "PGRST202" ? "disabled" : "network" };
+    if (!data.ok) return data;
+    if (data.device_id && data.device_id !== device_id) await setDeviceId(String(data.device_id));
+    await endAuthSession();
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// Ny kontonyckel: alla andra telefoner loggas ut. { ok, device_id } eller { ok: false, error }.
+export async function rotateAccountKey() {
+  try {
+    const { data, error } = await auth().rpc("account_rotate");
+    if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
+    if (!data.ok) return data;
+    await setDeviceId(String(data.device_id));
+    await endAuthSession();
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// Radera kontot. Telefonen får ett nytt id och börjar om utan konto. { ok, deleted }.
+export async function deleteAccount() {
+  try {
+    const { data, error } = await auth().rpc("account_delete");
+    if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
+    if (!data.ok) return data;
+    await endAuthSession();
+    await newDeviceId();
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+// Är telefonen kopplad till ett konto? { ok, linked, email (maskad) } — { ok: false } = vet inte (nätfel).
+export async function accountStatus() {
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await supabase.rpc("account_status", { p_device_id: device_id });
+    if (error) return error.code === "PGRST202" ? { ok: true, linked: false } : { ok: false };
+    if (!data || data.ok !== true) return { ok: false };
+    return { ok: true, linked: !!data.linked, email: data.email || null };
+  } catch {
+    return { ok: false };
+  }
 }
 
 export async function loadWallet() {

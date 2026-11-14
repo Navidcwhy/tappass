@@ -10,8 +10,8 @@ import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
 import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
-import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus } from "./src/lib/supabase";
-import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp } from "./src/lib/prefs";
+import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId } from "./src/lib/supabase";
+import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp, getAccount, setAccount, clearAccount, accountHintDismissed, dismissAccountHint } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
 import { expiryText, isActiveUntil, availableIn } from "./src/lib/wheel";
 import CardStack from "./src/components/CardStack";
@@ -30,6 +30,7 @@ import { openState, openText } from "./src/lib/hours";
 import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
+import AccountSheet from "./src/components/AccountSheet";
 import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
 import Shape from "./src/components/Shape";
@@ -141,6 +142,13 @@ export default function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [bottomH, setBottomH] = useState(96);
+  // Konto (v14): frivilligt. authMethods = vilka inloggningssätt servern slagit på
+  // (null = inte hämtat); account = { email } när telefonen är kopplad till ett konto.
+  const [authMethods, setAuthMethods] = useState(null);
+  const [account, setAccountState] = useState(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [hintDismissed, setHintDismissed] = useState(true);
+  const [accountEpoch, setAccountEpoch] = useState(0);   // ny telefonnyckel → sparat-räknaren börjar om
   const walletRef = useRef(wallet);
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   // Första stämpeln någonsin på telefonen (välkomstfirande). true tills flaggan lästs,
@@ -231,6 +239,13 @@ export default function App() {
     setWallet(walletFromRows(rows));
   }, []);
 
+  // Konto (v14): vilka inloggningssätt servern slagit på (hämtas igen om det misslyckades)
+  const authMethodsRef = useRef(null);
+  const loadAuthMethods = useCallback(async () => {
+    const m = await getAuthMethods();
+    if (m) { authMethodsRef.current = m; setAuthMethods(m); }
+  }, []);
+
   // Tillbaka från bakgrunden: hämta kort och hjul igen. Annars kan appen visa en
   // utgången dubbelstämpel eller sakna pricken för dagens snurr tills något laddar om.
   useEffect(() => {
@@ -239,12 +254,13 @@ export default function App() {
       if (last === "background" && next === "active" && syncedRef.current) {
         refreshWallet();
         loadWheel();
+        if (!authMethodsRef.current) loadAuthMethods();
       }
       if (last === "background" && next === "active") setSeasonRun((n) => n + 1);
       last = next;
     });
     return () => sub.remove();
-  }, [refreshWallet, loadWheel]);
+  }, [refreshWallet, loadWheel, loadAuthMethods]);
 
   // Nytt snurr vid midnatt: hämta läget när serverns nästa snurrtid passerats,
   // så att pricken på Hjul-fliken dyker upp även om appen står öppen.
@@ -280,6 +296,26 @@ export default function App() {
     setToast(t);
     toastTimer.current = setTimeout(() => { toastTimer.current = null; setToast(null); }, ms);
   }, []);
+
+  // Konto (v14): läget på telefonen, vilka inloggningssätt som är påslagna, och om
+  // telefonen loggats ut från en annan telefon ("Logga ut andra telefoner").
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const [a, dismissed] = await Promise.all([getAccount(), accountHintDismissed()]);
+      if (!alive) return;
+      setAccountState(a);
+      setHintDismissed(dismissed);
+      loadAuthMethods();
+      if (!a) return;
+      const s = await accountStatus();
+      if (!alive || !s.ok || s.linked) return;
+      clearAccount();
+      setAccountState(null);
+      showToast({ type: "info", icon: "user", title: "Utloggad från kontot", subtitle: "Logga in igen för att se dina sparade stämplar." }, 5000);
+    })();
+    return () => { alive = false; };
+  }, [loadAuthMethods, showToast]);
 
   const stampTimer = useRef(null);
   const closeStamp = useCallback(() => {
@@ -460,6 +496,32 @@ export default function App() {
     }
   };
 
+  // Konto (v14): telefonen kopplades, loggades ut (här eller från en annan telefon), fick
+  // ny nyckel eller kontot raderades. Telefonens id kan ha bytts — hämta kort och hjul igen.
+  const onAccountChanged = async (ev) => {
+    if (ev.type === "linked") {
+      const a = { email: ev.email, since: new Date().toISOString() };
+      setAccountState(a);
+      setAccount(a);
+    } else if (ev.type !== "rotated") {
+      // logout: nytt slumpat id (deleteAccount har redan bytt id; "gone" behåller sitt)
+      if (ev.type === "logout") await newDeviceId().catch(() => {});
+      setAccountState(null);
+      clearAccount();
+      if (ev.type !== "gone") setWallet({});
+    }
+    const [rows] = await Promise.all([loadWallet(), loadWheel()]);
+    if (rows) setWallet(walletFromRows(rows));
+    setAccountEpoch((n) => n + 1);   // sparat-räknaren utgår från de nya korten (räknar inte upp)
+    if (ev.type === "logout") showToast({ type: "info", icon: "logout", title: "Utloggad från den här telefonen", subtitle: "Dina stämplar finns kvar på kontot." }, 4500);
+    if (ev.type === "rotated") showToast({ type: "info", icon: "shield", title: "Andra telefoner är utloggade", subtitle: "Den här telefonen fortsätter som vanligt." }, 4500);
+    if (ev.type === "deleted") showToast({ type: "info", icon: "trash", title: "Kontot är raderat", subtitle: "Du kan fortsätta samla stämplar utan konto." }, 4500);
+  };
+  // Kontoknappen syns när inloggningen är påslagen (eller telefonen redan är kopplad).
+  const accountOn = !!account || !!(authMethods && authMethods.email);
+  const showAccountHint = !account && !!(authMethods && authMethods.email) && !hintDismissed;
+  const onDismissHint = () => { setHintDismissed(true); dismissAccountHint(); };
+
   const titles = { home: "Dina kort", wheel: "Dagens hjul", discover: "Ställen" };
   // Pricken på Hjul: oupphämtad vinst, eller ett snurr som faktiskt kan ge något i
   // kundens stad (inte när kunden redan har dubbelstämpel hos alla ställen där).
@@ -483,6 +545,8 @@ export default function App() {
           onHelp={() => (tab === "wheel" ? setRulesOpen(true) : setShowOnboarding(true))}
           helpLabel={tab === "wheel" ? "Regler för Dagens hjul" : "Hjälp och introduktion"}
           loading={loadingAction}
+          account={accountOn ? account || false : null}
+          onAccount={() => setAccountOpen(true)}
         />
 
         <Animated.ScrollView
@@ -511,7 +575,11 @@ export default function App() {
               quietKey={quietKey}
               savings={savings}
               savingsHold={!!(rewardId || celebrationId)}
+              savingsKey={accountEpoch}
               synced={synced}
+              accountHint={showAccountHint}
+              onAccountHint={() => setAccountOpen(true)}
+              onDismissHint={onDismissHint}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -548,21 +616,32 @@ export default function App() {
         <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); setRewardTier(null); }} onRedeemed={onRedeemed} onCancelled={refreshWallet} registerRedeem={registerRedeem} autoRedeem={rewardAuto} preferTier={rewardTier} />
         <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} tier={celebrationTier} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => { setCelebrationId(null); setCelebrationTier(null); }} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
+        <AccountSheet visible={accountOpen} account={account} onChanged={onAccountChanged} onClose={() => setAccountOpen(false)} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
 
-function Header({ title, onHelp, helpLabel, loading }) {
+// account: null = ingen kontoknapp (inloggningen avstängd), false = inte inloggad, { email } = inloggad
+function Header({ title, onHelp, helpLabel, loading, account, onAccount }) {
+  const round = (pressed, bg) => ({ width: 48, height: 48, borderRadius: 24, backgroundColor: bg, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.8 : 1 });
   return (
     <View style={{ paddingLeft: 20, paddingRight: 16, paddingTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text accessibilityRole="header" style={{ fontFamily: FONT.title, fontSize: 34, lineHeight: 40, color: T.ink }}>{title}</Text>
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Text accessibilityRole="header" numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONT.title, fontSize: 34, lineHeight: 40, color: T.ink }}>{title}</Text>
         {loading && <ActivityIndicator size="small" color={T.inkMute} />}
       </View>
-      <Pressable accessibilityLabel={helpLabel || "Hjälp och introduktion"} onPress={onHelp} style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 24, backgroundColor: T.container, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.8 : 1 })}>
-        <Icon name="help" size={22} color={T.ink} />
-      </Pressable>
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        {account !== null && (
+          <Pressable accessibilityLabel={account ? "Konto, inloggad" : "Konto: spara dina stämplar"} onPress={onAccount} style={({ pressed }) => round(pressed, account ? T.primaryContainer : T.container)}>
+            <Icon name="user" size={22} color={account ? T.onPrimaryContainer : T.ink} />
+            {!!account && <View style={{ position: "absolute", right: 7, bottom: 7, width: 14, height: 14, borderRadius: 7, backgroundColor: T.primary, borderWidth: 2, borderColor: T.primaryContainer, alignItems: "center", justifyContent: "center" }}><Icon name="check" size={8} color="#FFFFFF" strokeWidth={4} /></View>}
+          </Pressable>
+        )}
+        <Pressable accessibilityLabel={helpLabel || "Hjälp och introduktion"} onPress={onHelp} style={({ pressed }) => round(pressed, T.container)}>
+          <Icon name="help" size={22} color={T.ink} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -592,7 +671,7 @@ function SeasonChip({ season }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, synced }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, savingsKey, synced, accountHint, onAccountHint, onDismissHint }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -605,14 +684,36 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
   return (
     <View>
       {/* Sparat-räknaren (v10). Ligger i hemflikens topp: kortbunten mäter sitt läge själv. */}
-      {savings && <SavingsBanner savings={savings} hold={savingsHold} synced={synced} />}
+      {savings && <SavingsBanner key={"sparat" + (savingsKey || 0)} savings={savings} hold={savingsHold} synced={synced} />}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
         {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
         {!!(season && season.greeting) && <SeasonChip season={season} />}
       </View>
       <CardStack cards={shown} onOpenReward={onOpenReward} scrollY={scrollY} viewH={listH} quietKey={quietKey} />
+      {accountHint && <AccountHint onOpen={onAccountHint} onDismiss={onDismissHint} />}
       {__DEV__ && onSimulate && <DevSimulate cafes={cafes} onSimulate={onSimulate} />}
+    </View>
+  );
+}
+
+// Konto (v14): under korten, tills kunden skapat konto eller stängt rutan.
+function AccountHint({ onOpen, onDismiss }) {
+  return (
+    <View style={{ marginTop: 16, padding: 16, paddingRight: 8, borderRadius: 24, borderWidth: 1.5, borderStyle: "dashed", borderColor: T.outline, flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+      <Shape kind="cookie9" size={48} color={T.primaryContainer}>
+        <Icon name="cloudCheck" size={22} color={T.onPrimaryContainer} />
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontFamily: FONT.title, fontSize: 16, lineHeight: 22, color: T.ink }}>Spara dina stämplar</Text>
+        <Text style={{ marginTop: 2, fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: T.inkSoft }}>Utan konto finns de bara i den här telefonen.</Text>
+        <Pressable onPress={onOpen} accessibilityRole="button" style={{ marginTop: 6, alignSelf: "flex-start", minHeight: 40, justifyContent: "center" }}>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.primary }}>Skapa konto</Text>
+        </Pressable>
+      </View>
+      <Pressable accessibilityLabel="Stäng tipset om konto" onPress={onDismiss} style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+        <Icon name="close" size={20} color={T.inkSoft} />
+      </Pressable>
     </View>
   );
 }

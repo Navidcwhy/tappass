@@ -4,6 +4,7 @@ import {
   WifiOff, CircleAlert, Smartphone, Keyboard, RotateCcw, ChevronsRight, ChevronRight,
   Megaphone, Info, Link, Share2, ScanLine, FerrisWheel, ChevronDown, RotateCw, ExternalLink,
   Coffee, Croissant, Utensils, Leaf, IceCream, PiggyBank, Award, Clock, Globe, AtSign,
+  CircleUserRound, Mail, MailCheck, LogOut, Trash2, CloudCheck, ShieldCheck,
 } from "lucide-react-native";
 
 const CAFE = { coffee: Coffee, croissant: Croissant, utensils: Utensils, leaf: Leaf, icecream: IceCream };
@@ -15,6 +16,8 @@ const MAP = {
   chev: ChevronRight, megaphone: Megaphone, info: Info, link: Link, share: Share2, scan: ScanLine,
   wheel: FerrisWheel, chevDown: ChevronDown, spin: RotateCw, external: ExternalLink,
   piggy: PiggyBank, award: Award, clock: Clock, globe: Globe, at: AtSign,
+  user: CircleUserRound, mail: Mail, mailCheck: MailCheck, logout: LogOut, trash: Trash2,
+  cloudCheck: CloudCheck, shield: ShieldCheck,
   ...CAFE,
 };
 
