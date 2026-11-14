@@ -119,6 +119,18 @@ export async function redeemByTap(cafeSlug, token) {
   }
 }
 
+// Butikens logga (v13): { ok, version, mime, data (base64) } — data null = ingen logga.
+// Nätfel → { ok: false } (appen visar då initialen eller en äldre sparad logga).
+export async function getCafeLogo(cafeSlug) {
+  try {
+    const { data, error } = await supabase.rpc("cafe_logo", { p_slug: cafeSlug });
+    if (error || !data || typeof data !== "object") return { ok: false };
+    return data;
+  } catch {
+    return { ok: false };
+  }
+}
+
 // ── Dagens hjul (v6) ─────────────────────────────────────────────────────
 // Alla tre returnerar serverns jsonb. Nät-/RPC-fel blir { ok: false, error: "network" }
 // så att UI:t aldrig tolkar ett nätfel som "redan snurrat" eller "ingen vinst".

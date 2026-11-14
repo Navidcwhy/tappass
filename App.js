@@ -24,6 +24,9 @@ import { cleanTiers, crossedTier, krValue } from "./src/lib/tiers";
 import { savingsFields, keepSavings, walletSavings } from "./src/lib/savings";
 import { visitsFields, afterTap, crossedLevel, levelFor, progressText } from "./src/lib/levels";
 import RewardSheet from "./src/components/RewardSheet";
+import PlaceSheet from "./src/components/PlaceSheet";
+import CafeAvatar from "./src/components/CafeAvatar";
+import { openState, openText } from "./src/lib/hours";
 import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -55,6 +58,13 @@ function normalizeCafe(c) {
     quietHours: Array.isArray(c.quiet_hours) ? c.quiet_hours : [],   // v8: lugna timmar
     tiers: cleanTiers(c.reward_tiers, c.stamps_needed),               // v10: mindre belöningar
     rewardValue: krValue(c.reward_value_kr),                          // v10: huvudbelöningens värde (kr)
+    // v13: profilen som butiken själv fyller i
+    address: c.address || "",
+    description: c.description || "",
+    website: c.website || "",
+    instagram: c.instagram || "",
+    openingHours: Array.isArray(c.opening_hours) ? c.opening_hours : [],
+    logoVersion: Number(c.logo_version) || 0,
   };
 }
 
@@ -98,7 +108,6 @@ export function tokenFromUrl(url) {
   } catch { return null; }
 }
 
-const initialOf = (name) => (name || "?").trim().charAt(0).toUpperCase();
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -651,6 +660,7 @@ function DevSimulate({ cafes, onSimulate }) {
 
 function PlacesTab({ cafes, wallet, quietKey }) {
   const [q, setQ] = useState("");
+  const [place, setPlace] = useState(null);   // v13: ställets sida (slug)
   const [type, setType] = useState(null);
   const types = useMemo(
     () => [...new Set(cafes.map((c) => c.type).filter(Boolean))].sort((a, b) => a.localeCompare(b, "sv")),
@@ -699,7 +709,7 @@ function PlacesTab({ cafes, wallet, quietKey }) {
       </Text>
 
       <View style={{ gap: 10 }}>
-        {list.map((c) => <PlaceCard key={c.slug} cafe={c} card={wallet[c.slug]} quiet={quietKey ? quietNow(c.quietHours) : null} />)}
+        {list.map((c) => <PlaceCard key={c.slug} cafe={c} card={wallet[c.slug]} quiet={quietKey ? quietNow(c.quietHours) : null} onPress={() => setPlace(c.slug)} />)}
       </View>
 
       {list.length === 0 && cafes.length > 0 && (
@@ -720,11 +730,13 @@ function PlacesTab({ cafes, wallet, quietKey }) {
           </Pressable>
         </View>
       </View>
+
+      <PlaceSheet cafe={place ? cafes.find((c) => c.slug === place) : null} card={place ? wallet[place] : null} onClose={() => setPlace(null)} />
     </View>
   );
 }
 
-function PlaceCard({ cafe, card, quiet }) {
+function PlaceCard({ cafe, card, quiet, onPress }) {
   const t = toneFor(cafe.ink);
   const meta = [cafe.type, cafe.area].filter(Boolean).join(" · ");
   const needed = cafe.needed || card?.needed || 0;
@@ -735,11 +747,15 @@ function PlaceCard({ cafe, card, quiet }) {
   const visits = card && card.hasLevels ? card.visits : 0;   // v11: stamgästnivå
   const schedule = quietSummary(cafe.quietHours);
   const periods = quietParts(cafe.quietHours);
+  const open = openState(cafe.openingHours);   // v13: öppettider
   return (
-    <View style={{ padding: 16, borderRadius: 24, backgroundColor: t.container, flexDirection: "row", alignItems: "center", gap: 14 }}>
-      <Shape kind="cookie9" size={52} color={t.primary}>
-        <Text style={{ fontFamily: FONT.bold, fontSize: 20, color: "#FFFFFF" }}>{initialOf(cafe.name)}</Text>
-      </Shape>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint={"Visa mer om " + cafe.name}
+      style={({ pressed }) => ({ padding: 16, borderRadius: 24, backgroundColor: t.container, flexDirection: "row", alignItems: "center", gap: 14, opacity: pressed ? 0.9 : 1 })}
+    >
+      <CafeAvatar cafe={cafe} size={52} color={t.primary} fontSize={20} />
       <View style={{ flex: 1 }}>
         <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 18, lineHeight: 24, color: t.onContainer }}>{cafe.name}</Text>
         {!!meta && <Text numberOfLines={1} style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 19, color: t.muted }}>{meta}</Text>}
@@ -749,6 +765,12 @@ function PlaceCard({ cafe, card, quiet }) {
             {cafe.rewardShort || cafe.reward}{needed ? " efter " + needed + " stämplar" : ""}
           </Text>
         </View>
+        {!!open && (
+          <View style={{ marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={{ width: 8, height: 8, marginHorizontal: 4, borderRadius: 4, backgroundColor: open.open ? "#2E7D32" : t.muted }} />
+            <Text style={{ flex: 1, fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: t.muted }}>{openText(open)}</Text>
+          </View>
+        )}
         {visits > 0 && (
           <View accessible accessibilityLabel={progressText(visits) + " (besök senaste 12 månaderna)"} style={{ marginTop: 4, flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon name="award" size={16} color={levelFor(visits) ? levelFor(visits).accent : t.onContainer} />
@@ -786,7 +808,7 @@ function PlaceCard({ cafe, card, quiet }) {
           )}
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 

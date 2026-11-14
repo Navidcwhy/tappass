@@ -8,6 +8,7 @@ import { optionFor, tierReady } from "../lib/tiers";
 import { levelFor } from "../lib/levels";
 import Shape from "./Shape";
 import LevelPill from "./LevelPill";
+import CafeAvatar from "./CafeAvatar";
 import StampRow from "./StampRow";
 import Shine from "./Shine";
 
@@ -35,7 +36,6 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
   const complete = !pending && stamps >= needed;
   const reward = pending || complete;
   const left = needed - stamps;
-  const initial = (c.name || "?").trim().charAt(0).toUpperCase();
   const meta = [c.type, c.area].filter(Boolean).join(" · ");
   const marks = (c.tiers || []).map((x) => x.at - 1);
   const ready = !pending && !complete ? tierReady(c) : null;      // v10: en mindre belöning kan lösas in
@@ -51,9 +51,7 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
       {reward && <Shape kind="sunny8" size={180} color={t.deco} style={{ position: "absolute", right: -46, top: -56 }} />}
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-        <Shape kind="cookie9" size={44} color={t.primary}>
-          <Text style={{ fontFamily: FONT.bold, fontSize: 18, color: "#FFFFFF" }}>{initial}</Text>
-        </Shape>
+        <CafeAvatar cafe={c} size={44} color={t.primary} fontSize={18} />
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONT.title, fontSize: 20, lineHeight: 25, color: t.onContainer }}>{c.name}</Text>
