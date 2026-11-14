@@ -106,8 +106,26 @@ export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
 const usedSun = new Set();   // dynamiska taggar (v17): varje läsning godkänns en gång
 let sdmStamps = 3;
+// ?s=kedja: kedjekort (v18) — Kaffekedjan med tre ställen. Tappet hos Södermalm räknas på kedjans kort.
+const KK = { id: "u-kk", slug: "kaffekedjan", name: "Kaffekedjan", type: "Kafé", area: "Flera ställen", ink_color: "#6B3A1F", reward_text: "En kaffe på huset",
+  reward_short: "Gratis kaffe", stamps_needed: 8, city: "Stockholm", is_chain: true, opening_hours: [], reward_tiers: [{ at: 4, text: "En kanelbulle" }] };
+const kkStore = (slug, name, area, address, hours) => ({ id: "u-" + slug, slug, name, type: "Kafé", area, ink_color: "#6B3A1F", reward_text: "En kaffe på huset",
+  reward_short: "Gratis kaffe", stamps_needed: 8, city: "Stockholm", chain_id: "u-kk", address, opening_hours: hours });
+const KK_STORES = [
+  kkStore("kk-soder", "Kaffekedjan Södermalm", "Södermalm", "Götgatan 21, 116 46 Stockholm", [{ days: [1, 2, 3, 4, 5, 6, 7], from: "07:00", to: "19:00" }]),
+  kkStore("kk-vasa", "Kaffekedjan Vasastan", "Vasastan", "Odengatan 40, 113 51 Stockholm", [{ days: [1, 2, 3, 4, 5], from: "07:30", to: "18:00" }, { days: [6, 7], from: "09:00", to: "17:00" }]),
+  kkStore("kk-kungsholmen", "Kaffekedjan Kungsholmen", "Kungsholmen", "Hantverkargatan 12, 112 21 Stockholm", [{ days: [1, 2, 3, 4, 5, 6, 7], from: "08:00", to: "18:00" }]),
+];
+let kkStamps = 2;
 export async function tapToken(token, sun) {
   await delay(D);
+  if (S === "kedja") {
+    if (!/^kk-/.test(token)) return { ok: false, error: "unknown_tag" };
+    kkStamps += 1;
+    const st = KK_STORES.find((x) => token.startsWith(x.slug)) || KK_STORES[0];
+    return { ok: true, cafe: KK, stamps: kkStamps, complete: false, stamps_added: 1, bonus_applied: false, quiet_applied: false, carry_over: 0,
+      place: { slug: st.slug, name: st.name, area: st.area } };
+  }
   if (S === "sdm") {
     if (!sun) return { ok: false, error: "sdm_required" };
     if (sun.c === "0000000000000000") return { ok: false, error: "sdm_invalid" };
@@ -168,6 +186,11 @@ export async function redeemByTap(slug, token) {
   return { ok: true, carry_over: 1, stamps: 1 };
 }
 export async function loadWallet() {
+  if (S === "kedja") return [
+    { cafe: KK, stamps: kkStamps, pending: false, visits_12m: 6, last_visit: null,
+      stores: KK_STORES.map((x) => ({ slug: x.slug, name: x.name, area: x.area, address: x.address, opening_hours: x.opening_hours, logo_version: 0 })) },
+    { cafe: LINNEA_P, stamps: 5, pending: false },
+  ];
   await delay(50);
   if (S === "sdm") return [
     { cafe: MIYABI, stamps: sdmStamps, pending: false, bonus_expires_at: null },
@@ -227,7 +250,7 @@ export async function loadWallet() {
   if (claimed) rows.push({ cafe: LINNEA, stamps: 0, pending: false, bonus_expires_at: midnight(3) });
   return rows;
 }
-export const loadCafes = async () => (S === "fodelsedag" ? [BRYGGAN, LINNEA_B, MIYABI_B] : S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : S === "profil" ? [BRYGGAN_P, LINNEA_P, MIYABI_P] : S === "niva" ? [BRYGGAN_V, { ...LINNEA, reward_value_kr: 39 }, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
+export const loadCafes = async () => (S === "kedja" ? [KK, ...KK_STORES, LINNEA_P, MIYABI_P] : S === "fodelsedag" ? [BRYGGAN, LINNEA_B, MIYABI_B] : S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : S === "profil" ? [BRYGGAN_P, LINNEA_P, MIYABI_P] : S === "niva" ? [BRYGGAN_V, { ...LINNEA, reward_value_kr: 39 }, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
 export async function wheelStatus() {
   await delay(80);
   const base = { ok: true, can_spin: true, next_spin_at: midnight(1), today: null, prize: null, bonuses: [], cities: CITIES };

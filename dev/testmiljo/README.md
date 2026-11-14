@@ -4,10 +4,10 @@ Sparad 2026-11-13 så att en ny Claude-session kan fortsätta utan att bygga om 
 Används i en **kopia** av repot, aldrig i själva appen (filerna här byggs inte in).
 
 ## Innehåll
-- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 187 tester: 185 körs på Android, 186 på iOS (resten bara på den andra plattformen).
+- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 193 tester: 191 körs på Android, 192 på iOS (resten bara på den andra plattformen).
   (Taggverktygets tester togs bort med verktyget 2026-11-14 — finns i commit `edef21f` på den här grenen.)
 - `app/jest.*.config.js`, `app/jest.setup.js` — konfiguration och mockar (haptik, svg, ikoner, AsyncStorage).
-- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|profil|konto|konto2|fodelsedag|bjudin|bjudin2|sdm|stack|win|quiet|home …`,
+- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|profil|konto|konto2|fodelsedag|bjudin|bjudin2|sdm|kedja|stack|win|quiet|home …`,
   `&d=<ms>` innan tappet svarar), NFC och NFC-status för webbförhandsvisningen.
   `window.__tappassTag("miyabi-01")` simulerar att en stämpel hålls mot telefonen (`?s=tap`: Bryggan = fel stämpel).
   `?s=sdm` = dynamiska taggar (v17): `__tappassTag("https://tappass.se/t/miyabi-01?e=<32 hex>&c=<16 hex>")` ger en stämpel
@@ -41,6 +41,7 @@ och Playwright svarar på alla RPC-anrop (`mock.cjs`) — ingen trafik når prod
 - `extract-lovable.py` — plockar ut `m.tsx`, `i18n.tsx`, `styles.css` och `merchant-supabase.ts`
   ur en Lovable-diff mot git:s tomma träd (svaret från `get_diff` sparas som fil eftersom det är stort).
 - `shim/router.js` — ersätter TanStack Router (`Route.component` = sidan).
+- `check-chain.cjs` — kedjestödet (v18, 69 kontroller): huvudkontots översikt, Visa/tillbaka/utgången visning, låsta belöningar, present och profil för ställen, vanligt ställe oförändrat.
 - `check.cjs` — funktionstest av hela panelutkastet (207 kontroller: lugna timmar, senast inlösta, belöningar och värden, stamgäster, insikter, vinn tillbaka, månadsrapport, profil, födelsedagspresent, kampanjstämplar med inbjudan; engelska och 360 px). `rec-panel.cjs` — video (768×1024 @2x).
 
 ```bash
@@ -49,5 +50,19 @@ cd dev/testmiljo/panel && npm ci
 python3 extract-lovable.py <sparad-diff-fil> .
 # + read_file src/assets/brand/tappass-wordmark.svg → src/assets/brand/tappass-wordmark.svg
 npx vite --port 5174 --strictPort --host 127.0.0.1 &
-node check.cjs && node rec-panel.cjs vid
+node check.cjs && node check-chain.cjs && node rec-panel.cjs vid
+```
+
+## Kedjor (v18) — `pgtest/v18/`
+Bygger och testar `supabase_migration_v18_kedjor.sql`. Repot väljs med `TAPPASS_REPO` (standard `/home/claude/tappass`).
+- `dump.mjs` skapar en kopia av produktionen i PGlite: `../base.sql` + v6…v17. Funktionerna skrivs till `orig/`. `orig/admin_issue_pin.sql` är produktionens version (v5), som inte finns i kopian.
+- `gen.mjs` bygger migrationen: `parts/*.sql` + `orig/` + exakta ändringar. Varje ändring ska träffa exakt rätt antal gånger, annars avbryts bygget. Vakten räknas fram ur kopian.
+- `cmp.mjs` jämför kopians md5 med `prod-md5.json` (produktionen 2026-11-14).
+- `test-v18.mjs` innehåller 353 kontroller:
+  - vanliga ställen ger samma svar före och efter;
+  - kedjans flöden;
+  - behörigheter, fingeravtryck, vakten och körning med `execute`.
+
+```bash
+cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && cd v18 && node dump.mjs && node gen.mjs && node test-v18.mjs
 ```
