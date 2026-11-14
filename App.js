@@ -35,7 +35,6 @@ import AccountSheet from "./src/components/AccountSheet";
 import BirthdaySheet, { PINK } from "./src/components/BirthdaySheet";
 import { bannerText } from "./src/lib/birthday";
 import InviteSheet from "./src/components/InviteSheet";
-import TagProgrammer from "./src/components/TagProgrammer";
 import { INVITE_STAMPS, unseenText } from "./src/lib/invite";
 import StampSheet from "./src/components/StampSheet";
 import Snackbar from "./src/components/Snackbar";
@@ -126,19 +125,6 @@ export function tokenFromUrl(url) {
   return tag ? tag.token : null;
 }
 
-// Taggverktyget (v17): tappass://programmera (och tappass:///programmera) — aldrig en webbadress
-export function isProgrammerUrl(url) {
-  if (!url) return false;
-  try {
-    const parsed = Linking.parse(url);
-    const scheme = String(parsed.scheme || "").toLowerCase();
-    if (scheme === "http" || scheme === "https") return false;
-    const host = String(parsed.hostname || "").toLowerCase();
-    const path = String(parsed.path || "").replace(/^\/+|\/+$/g, "").toLowerCase();
-    return host === "programmera" || (!host && path === "programmera");
-  } catch { return false; }
-}
-
 // Stämpling från en tagg ({ token, sun }), en länk eller dev-simuleringen ("miyabi-01")
 const asTag = (input) => (input && typeof input === "object" ? input : splitTag(input));
 
@@ -180,10 +166,6 @@ export default function App() {
   const [authMethods, setAuthMethods] = useState(null);
   const [account, setAccountState] = useState(null);
   const [accountOpen, setAccountOpen] = useState(false);
-  // Taggverktyget (v17): medan det är öppet läser appen inga stämplar (NFC-läsningen och länkar)
-  const [programmerOpen, setProgrammerOpen] = useState(false);
-  const programmerRef = useRef(false);
-  programmerRef.current = programmerOpen;
   const [hintDismissed, setHintDismissed] = useState(true);
   const [accountEpoch, setAccountEpoch] = useState(0);   // ny telefonnyckel → sparat-räknaren börjar om
   // Födelsedagspresent (v15): birthday_status för kontot (null = inget konto / inte hämtat)
@@ -552,9 +534,6 @@ export default function App() {
 
   // Tag is tapped via NFC deep-link (https://tappass.se/t/<token>[?e=…&c=…]) or local simulate
   const handleUrl = useCallback((url) => {
-    if (isProgrammerUrl(url)) { setProgrammerOpen(true); return; }
-    // En nyprogrammerad tagg som ligger kvar mot telefonen kan läsas av systemet som länk
-    if (programmerRef.current) return;
     const tag = tagFromUrl(url);
     if (!tag) return;
     sendTagTap(tag);
@@ -755,7 +734,7 @@ export default function App() {
         )}
 
         <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)}>
-          {tab === "home" && !programmerOpen && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
+          {tab === "home" && <LiveScanner nfc={nfc} onSendTap={sendTagTap} />}
           <BottomNav tab={tab} setTab={setTab} wheelReady={wheelReady} />
         </View>
 
@@ -764,12 +743,11 @@ export default function App() {
         <StampSheet card={stampCard} onClose={closeStamp} />
         <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); setRewardTier(null); }} onRedeemed={onRedeemed} onCancelled={refreshWallet} registerRedeem={registerRedeem} autoRedeem={rewardAuto} preferTier={rewardTier} />
         <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} tier={celebrationTier} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => { setCelebrationId(null); setCelebrationTier(null); }} />
-        <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} onAdmin={() => { closeOnboarding(); setProgrammerOpen(true); }} />
+        <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
         <AccountSheet visible={accountOpen} account={account} onChanged={onAccountChanged} onClose={() => setAccountOpen(false)}
           birthday={birthday} birthdayOn={birthdayOn} birthdayOffered={birthdayOffered} />
         <BirthdaySheet visible={birthdayOpen} status={birthday} cafes={allCafes} registerRedeem={registerRedeem} onChanged={loadBirthday} onClose={() => setBirthdayOpen(false)} />
         <InviteSheet visible={inviteOpen} status={invite} onChanged={onInviteChanged} onClose={() => setInviteOpen(false)} />
-        <TagProgrammer visible={programmerOpen} onClose={() => setProgrammerOpen(false)} />
       </SafeAreaView>
     </SafeAreaProvider>
   );
