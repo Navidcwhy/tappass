@@ -80,6 +80,7 @@ export default function PlaceSheet({ cafe, card, onClose }) {
             <View style={{ marginTop: 18, borderRadius: 24, backgroundColor: T.surface, borderWidth: 1, borderColor: T.hairline, overflow: "hidden" }}>
               <Row icon="gift" title={(c.rewardShort || c.reward) + (c.needed ? " efter " + c.needed + " stämplar" : "")}
                 sub={(c.tiers || []).length ? "Eller " + c.tiers.map((x) => lowerFirst(x.text) + " vid " + x.at).join(", ") : null} />
+              {!!c.birthdayText && <Row icon="cake" title="Födelsedagspresent" sub={c.birthdayText + " – på födelsedagen, för dig med konto"} />}
               {!!quiet && <Row icon="timer" title="Dubbla stämplar" sub={quiet} />}
               {hours.length > 0 && <Row icon="clock" title="Öppettider" sub={hours.join("\n")} />}
               {!!c.address && <Row icon="pin" title={c.address} sub="Visa på kartan" onPress={() => go(mapsUrl(c))} />}

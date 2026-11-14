@@ -60,6 +60,8 @@ Innan kontot slås på: uppdatera tappass.se/integritetspolicy (Lovable-projekte
 - data lagras hos Supabase i EU (eu-north-1, Stockholm) och mejlen skickas via SMTP-leverantören,
 - kontot kan raderas i appen när som helst: e-posten och kontot raderas, stämplarna försvinner
   ur appen och finns kvar i butikernas statistik utan koppling till kunden.
+- (v15) kunden kan frivilligt ange sin födelsedag — bara dag och månad, inte året — för
+  födelsedagspresenten; den raderas med kontot eller när kunden tar bort den.
 
 Uppdatera också App Store Connect (App Privacy: E-postadress, kopplad till användaren, för
 appens funktion) och Google Play (Datasäkerhet: e-post samlas in, kan raderas).
