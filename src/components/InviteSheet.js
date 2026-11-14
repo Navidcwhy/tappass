@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, Modal, Pressable, Animated, Easing, ScrollView, TextInput, KeyboardAvoidingView, Dimensions, ActivityIndicator, Share } from "react-native";
+import { View, Text, Modal, Pressable, Animated, Easing, ScrollView, TextInput, KeyboardAvoidingView, Dimensions, ActivityIndicator, Share, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { T, FONT } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import Shape from "./Shape";
 import { getInviteCode, redeemInvite } from "../lib/supabase";
-import { INVITE_STAMPS, INVITE_DAYS, cleanInviteCode, validInviteCode, formatInviteCode, shareText, inviteErrorText, enteredText, friendsText, dayText } from "../lib/invite";
+import { INVITE_STAMPS, INVITE_DAYS, TERMS_URL, cleanInviteCode, validInviteCode, formatInviteCode, shareText, inviteErrorText, enteredText, friendsText, dayText } from "../lib/invite";
 
 // Bjud in en vän (v16): din kod att dela, och — för nya kunder — en väns kod att ange.
 //   visible
@@ -160,8 +160,12 @@ export default function InviteSheet({ visible, status, onChanged, onClose }) {
             )}
 
             <Text style={{ marginTop: 16, fontFamily: FONT.regular, fontSize: 13, lineHeight: 19, color: T.inkSoft, textAlign: "center" }}>
-              Bara riktiga stämplingar i kassan räknas. En väns kod per telefon eller konto.
+              Bara riktiga stämplingar i kassan räknas. En väns kod per telefon eller konto. Bjud in en vän anordnas av Folde.AI AB – Apple och Google är inte inblandade.
             </Text>
+            <Pressable onPress={() => Linking.openURL(TERMS_URL).catch(() => {})} accessibilityRole="link" style={{ marginTop: 4, minHeight: 44, alignSelf: "center", flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: T.primary }}>Fullständiga regler</Text>
+              <Icon name="external" size={16} color={T.primary} />
+            </Pressable>
             <Pressable onPress={onClose} accessibilityRole="button" style={({ pressed }) => ({ marginTop: 16, height: 52, borderRadius: 26, backgroundColor: T.container, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}>
               <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.ink }}>Stäng</Text>
             </Pressable>

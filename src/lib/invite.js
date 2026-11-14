@@ -6,6 +6,8 @@ import { MONTHS } from "./birthday";
 
 export const INVITE_STAMPS = 2;
 export const INVITE_DAYS = 7;
+// Reglerna (användarvillkoren § 7, uppdaterade 2026-11-14)
+export const TERMS_URL = "https://tappass.se/anvandarvillkor";
 
 export const cleanInviteCode = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
 export const validInviteCode = (s) => /^[2-9A-HJKMNP-Z]{6}$/.test(cleanInviteCode(s));
