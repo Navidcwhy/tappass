@@ -73,3 +73,16 @@ export async function dismissAccountHint() {
   try { await AsyncStorage.setItem(ACCOUNT_HINT_KEY, "1"); }
   catch {}
 }
+
+// Rutan "Bjud in en vän" under Kort — stängd av kunden (v16)
+const INVITE_HINT_KEY = "tappass.inviteHint";
+
+export async function inviteHintDismissed() {
+  try { return (await AsyncStorage.getItem(INVITE_HINT_KEY)) === "1"; }
+  catch { return false; }
+}
+
+export async function dismissInviteHint() {
+  try { await AsyncStorage.setItem(INVITE_HINT_KEY, "1"); }
+  catch {}
+}
