@@ -7,7 +7,8 @@ import { Icon } from "../lib/icons";
 //   info          — väntetid hos butiken (tonal ruta)
 //   pending-block — belöning väntar → stämpling pausad (butikens färg + "Lös in")
 //   network       — ingen anslutning (mörk snackbar + "Försök igen")
-//   unknown       — okänd stämpel (felruta)
+//   unknown       — okänd stämpel (felruta; title/subtitle för andra stämpelfel, t.ex.
+//                   en dynamisk tagg som inte kunde kontrolleras)
 //   wheel-miss    — Dagens hjul: ingen vinst + tid till nästa snurr (mörk)
 export default function Snackbar({ toast, bottom = 100, onAction }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -90,8 +91,8 @@ function Body({ toast, onAction }) {
       <View style={{ ...SHADOW, borderRadius: 16, backgroundColor: T.errorContainer, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
         <Icon name="alert" size={22} color={T.onErrorContainer} />
         <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: FONT.bold, fontSize: 14, lineHeight: 19, color: T.onErrorContainer }}>Stämpeln känns inte igen</Text>
-          <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: T.errorText }}>Fråga personalen – den kan vara felkopplad.</Text>
+          <Text style={{ fontFamily: FONT.bold, fontSize: 14, lineHeight: 19, color: T.onErrorContainer }}>{toast.title || "Stämpeln känns inte igen"}</Text>
+          <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: T.errorText }}>{toast.subtitle || "Fråga personalen – den kan vara felkopplad."}</Text>
         </View>
       </View>
     );

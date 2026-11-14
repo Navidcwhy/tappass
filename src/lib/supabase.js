@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { cleanEmail, cleanCode } from "./account";
+import { wireToken } from "./tagurl";
 
 const SUPABASE_URL = "https://yaizagzyjfxvbqpknlsj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Oy72AtSsEQMTHeebp1TmLg_mceB0gf6";
@@ -46,10 +47,11 @@ export const newDeviceId = () => setDeviceId(makeId());
 // Returns the RPC's own jsonb ({ ok, error: "unknown_tag" | "pending_reward" |
 // "cooldown" | ... }). Transport/RPC failures are normalized to error: "network"
 // so the UI never shows a network failure as "unknown tag".
-export async function tapToken(token) {
+// sun = { e, c } från en dynamisk tagg (v17) — skickas med i p_token: "miyabi-01?e=…&c=…"
+export async function tapToken(token, sun) {
   const device_id = await getDeviceId();
   try {
-    const { data, error } = await supabase.rpc("tap_token", { p_device_id: device_id, p_token: token });
+    const { data, error } = await supabase.rpc("tap_token", { p_device_id: device_id, p_token: wireToken(token, sun) });
     if (error) return { ok: false, error: "network", detail: error.message };
     if (!data || typeof data !== "object") return { ok: false, error: "network" };
     return data;

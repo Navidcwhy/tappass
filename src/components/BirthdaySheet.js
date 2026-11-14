@@ -7,6 +7,7 @@ import { Icon } from "../lib/icons";
 import { claimBirthday, getBirthdayCode, redeemBirthdayByTap } from "../lib/supabase";
 import { dateText } from "../lib/birthday";
 import { IS_IOS, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "../lib/nfc";
+import { splitTag } from "../lib/tagurl";
 import useReduceMotion from "../lib/useReduceMotion";
 import { TapScreen, CodeScreen, tapErrorText, DISSOLVE_MS, genitive, clock } from "./RewardSheet";
 import Shape from "./Shape";
@@ -155,10 +156,10 @@ export default function BirthdaySheet({ visible, status, cafes, registerRedeem, 
     setTapError(null);
     setTapState("scanning");
     try {
-      const token = await readToken({ alertMessage: "Håll iPhonen mot " + genitive(gift.cafe_name) + " stämpel" });
-      await (token ? setIosAlert("Stämpel läst") : Promise.resolve());
+      const tag = splitTag(await readToken({ alertMessage: "Håll iPhonen mot " + genitive(gift.cafe_name) + " stämpel" }));
+      await (tag ? setIosAlert("Stämpel läst") : Promise.resolve());
       await cancelNfc();
-      if (token) await onTagRef.current(token);
+      if (tag) await onTagRef.current(tag.token);
       else { setTapState("idle"); setTapError({ kind: "unknown_tag", expected: gift.cafe_name }); }
     } catch (e) {
       await cancelNfc();
