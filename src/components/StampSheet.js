@@ -88,7 +88,7 @@ export default function StampSheet({ card, onClose }) {
     ? [{ index: stamps - 2, delay: HIT_1 + 80 }, { index: stamps - 1, delay: HIT_2 + 80 }]
     : [{ index: stamps - 1, delay: HIT_1 + 80 }];
 
-  const title = card.first ? "Din första stämpel!" : (double ? "Dubbelstämpel hos " : "Stämpel hos ") + card.name;
+  const title = card.first ? "Din första stämpel!" : (double ? "Dubbelstämpel hos " : "Stämpel hos ") + (card.place || card.name);   // v18: kedjans ställe
   const sub = card.first
     ? stamps + " av " + needed + " hos " + card.name + ". Samla " + left + " till för " + reward + "."
     : left === 1

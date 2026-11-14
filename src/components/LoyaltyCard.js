@@ -6,6 +6,7 @@ import { expiryText, isActiveUntil } from "../lib/wheel";
 import { clockText } from "../lib/quiet";
 import { optionFor, tierReady } from "../lib/tiers";
 import { levelFor } from "../lib/levels";
+import { metaText } from "../lib/chains";
 import Shape from "./Shape";
 import LevelPill from "./LevelPill";
 import CafeAvatar from "./CafeAvatar";
@@ -36,7 +37,7 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
   const complete = !pending && stamps >= needed;
   const reward = pending || complete;
   const left = needed - stamps;
-  const meta = [c.type, c.area].filter(Boolean).join(" · ");
+  const meta = metaText(c);   // v18: en kedja visar "Gäller på N ställen" i stället för området
   const marks = (c.tiers || []).map((x) => x.at - 1);
   const ready = !pending && !complete ? tierReady(c) : null;      // v10: en mindre belöning kan lösas in
   // Sparad belöning: rubriken är den belöning kunden valde (mindre belöning eller hela kortet).
