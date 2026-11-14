@@ -10,24 +10,26 @@ import Shape from "./Shape";
 //   exits     — [{ index, delay }]: fyllda stämplar som lyfter och försvinner när
 //               kortet börjar om efter inlösen (den tomma rutan blir kvar).
 //   glowIndex — den sista tomma rutan när bara en stämpel är kvar: lyser och pulserar.
-export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1, popDelay = 250, pops, exits, glowIndex = -1 }) {
+//   marks     — rutor där en mindre belöning väntar (v10): den tomma rutan visar ett paket.
+export default function StampRow({ total, filled, tone, size = 28, gap = 8, popIndex = -1, popDelay = 250, pops, exits, glowIndex = -1, marks }) {
   const n = Math.max(0, total | 0);
   const list = pops || (popIndex >= 0 ? [{ index: popIndex, delay: popDelay }] : []);
   const popAt = new Map(list.map((p) => [p.index, p.delay]));
   const exitAt = new Map((exits || []).map((e) => [e.index, e.delay]));
+  const marked = new Set(marks || []);
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap }}>
       {Array.from({ length: n }).map((_, i) => (
         <Stamp key={i} on={i < filled} tone={tone} size={size}
           pop={popAt.has(i)} popDelay={popAt.get(i) || 0}
           exit={exitAt.has(i)} exitDelay={exitAt.get(i) || 0}
-          glow={i === glowIndex && i >= filled} />
+          glow={i === glowIndex && i >= filled} mark={marked.has(i)} />
       ))}
     </View>
   );
 }
 
-function Stamp({ on, tone, size, pop, popDelay, exit, exitDelay, glow }) {
+function Stamp({ on, tone, size, pop, popDelay, exit, exitDelay, glow, mark }) {
   const p = useRef(new Animated.Value(pop ? 0 : 1)).current;
   const g = useRef(new Animated.Value(0)).current;
 
@@ -59,7 +61,7 @@ function Stamp({ on, tone, size, pop, popDelay, exit, exitDelay, glow }) {
 
   const empty = (
     <Shape kind="cookie9" size={size} color={tone.deco}>
-      {glow && <Gift size={Math.round(size * 0.5)} color={tone.primary} strokeWidth={2.4} />}
+      {(glow || mark) && <Gift size={Math.round(size * 0.5)} color={tone.primary} strokeWidth={2.4} />}
     </Shape>
   );
   const full = (

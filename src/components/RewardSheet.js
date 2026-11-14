@@ -5,7 +5,8 @@ import Svg, { Path } from "react-native-svg";
 import * as Haptics from "expo-haptics";
 import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
-import { saveReward, getCurrentSavedCode, redeemByTap } from "../lib/supabase";
+import { saveReward, getCurrentSavedCode, redeemByTap, cancelSavedReward } from "../lib/supabase";
+import { rewardOptions, optionFor, bestReached } from "../lib/tiers";
 import { IS_IOS, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "../lib/nfc";
 import useReduceMotion from "../lib/useReduceMotion";
 import Shape from "./Shape";
@@ -40,12 +41,13 @@ const DIGIT_GAP = 45;      // ms mellan siffrorna när de löses upp
 const RESET_AT = 950;      // ms efter "Inlöst!" när stämplarna börjar lyfta
 const LIFT_GAP = 70;       // ms mellan stämplarna som lyfter
 
-// Stämplar utöver ett fullt kort följer med till nästa kort vid inlösen (v6).
-// Kortet är alltid fullt innan inlösen; efteråt är plånbokens antal redan överskottet.
-const carryOf = (card) => {
-  const needed = Math.max(1, card?.needed || 1);
+// Stämplar utöver den inlösta belöningen följer med till nästa kort (v6). at = vald
+// belöning (v10: en mindre belöning), annars hela kortet. Efter inlösen är plånbokens
+// antal redan överskottet.
+const carryOf = (card, at) => {
+  const goal = at || Math.max(1, card?.needed || 1);
   const stamps = Math.max(0, card?.stamps || 0);
-  return stamps >= needed ? stamps - needed : stamps;
+  return stamps >= goal ? stamps - goal : stamps;
 };
 
 // Varför inlösen med stämpeln inte gick (servern avgör, v9).
@@ -55,6 +57,7 @@ export function tapErrorText(err, name) {
     case "wrong_tag": return { title: "Fel stämpel", text: "Använd " + store + "-stämpeln." };
     case "unknown_tag": return { title: "Ingen TapPass-stämpel", text: "Håll telefonen mot " + store + "-stämpeln." };
     case "not_complete": return { title: "Kortet är inte fullt än", text: "Belöningen går att lösa in när kortet är fullt." };
+    case "choose_reward": return { title: "Välj belöning först", text: "Välj vilken belöning du vill ha och tryck Lös in." };
     case "unavailable": return { title: "Fungerar inte just nu", text: "Visa sifferkoden för personalen i stället." };
     case "read": return { title: "Kunde inte läsa stämpeln", text: "Håll stilla en sekund och försök igen." };
     default: return { title: "Ingen anslutning", text: "Försök igen, eller visa sifferkoden för personalen." };
@@ -64,7 +67,7 @@ export function tapErrorText(err, name) {
 // Felbesked på det låsta arket (stämpeln lästes innan kunden tryckt "Lös in").
 const lockedErrorText = (err, name) => { const e = tapErrorText(err, name); return e.title + " – " + e.text; };
 
-export default function RewardSheet({ visible, card, onClose, onRedeemed, registerRedeem, autoRedeem = false }) {
+export default function RewardSheet({ visible, card, onClose, onRedeemed, onCancelled, registerRedeem, autoRedeem = false, preferTier = null }) {
   const [stage, setStage] = useState("loading"); // loading | locked | tap | revealed | dissolve | redeemed
   const [code, setCode] = useState(null);
   const [carry, setCarry] = useState(0);         // överskottet, låst i ögonblicket koden löstes in
@@ -75,6 +78,10 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
   const [saveFailed, setSaveFailed] = useState(false);
   const [tapState, setTapState] = useState(IS_IOS ? "idle" : "waiting"); // waiting | scanning | reading | idle
   const [tapError, setTapError] = useState(null);
+  const [tierAt, setTierAt] = useState(null);    // v10: vald belöning (null = hela kortet)
+  const [before, setBefore] = useState(0);       // stämplar på kortet när belöningen löstes in
+  const tierRef = useRef(null);
+  tierRef.current = tierAt;
   const doneRef = useRef(false);       // inlöst — händer bara en gång per öppning
   const busyRef = useRef(false);       // ett inlösenanrop i taget
   const autoScanRef = useRef(false);   // iOS: skanna direkt efter "Lös in"
@@ -104,10 +111,14 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
     setSaving(true);
     setSaveFailed(false);
     setTapError(null);
-    const result = await saveReward(target.slug);
+    // Flera belöningar (v10): skicka vald nivå. Annars som förut (fungerar även före v10).
+    const hasTiers = (target.tiers || []).length > 0;
+    const want = tierRef.current != null ? tierRef.current : (bestReached(target) || {}).at;
+    const result = await saveReward(target.slug, hasTiers ? want : undefined);
     setSaving(false);
     if (result.ok && result.code) {
       setCode(result.code);
+      if (hasTiers) setTierAt(result.tier_at != null ? Number(result.tier_at) : want);
       setTapError(null);
       setTapState(IS_IOS ? "idle" : "waiting");
       autoScanRef.current = true;
@@ -120,6 +131,8 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
   handleRedeemRef.current = handleRedeem;
   const autoRedeemRef = useRef(autoRedeem);
   autoRedeemRef.current = autoRedeem;
+  const preferRef = useRef(preferTier);
+  preferRef.current = preferTier;
 
   // Vid öppning: hämta ev. redan sparad kod (då väntar rutan direkt på stämpeln). Vid
   // nätfel visas låst läge — "Lös in" anropar save_reward, som returnerar den sparade
@@ -137,11 +150,18 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
     doneRef.current = false;
     busyRef.current = false;
     autoScanRef.current = false;
+    // v10: föreslå belöningen kunden valde i firandet, annars den största som nåtts.
+    const start = snap.current;
+    const reachable = (at) => at != null && (start?.stamps || 0) >= at;
+    const fallback = (bestReached(start) || {}).at;
+    const suggested = reachable(preferRef.current) ? preferRef.current : fallback;
+    setTierAt(start && (start.tiers || []).length ? (suggested ?? null) : null);
     (async () => {
       const r = await getCurrentSavedCode(slug);
       if (!alive) return;
       if (r.ok && r.code) {
         setCode(r.code);
+        if (r.tierAt != null && (start?.tiers || []).length) setTierAt(r.tierAt);
         setStage("tap");
       } else {
         setStage("locked");
@@ -157,6 +177,8 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
     if (doneRef.current) return;
     doneRef.current = true;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const needed = Math.max(1, snap.current?.needed || 1);
+    setBefore(Math.max(0, Math.min(snap.current?.stamps || 0, needed)));
     setCarry(carryN);
     setVia(how);
     setRedeemedAt(new Date());
@@ -182,7 +204,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
       if (!r.code) {
         alive = false;
         if (timer) clearInterval(timer);
-        finish(carryOf(snap.current), "code");   // kortet före inlösen — plånboken laddas om strax
+        finish(carryOf(snap.current, tierRef.current), "code");   // kortet före inlösen — plånboken laddas om strax
       }
     };
 
@@ -202,7 +224,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
     busyRef.current = false;
     if (doneRef.current) return;
     if (r.ok) {
-      finish(r.already ? carryOf(snap.current) : Math.max(0, Number(r.carry_over) || 0), r.already ? "code" : "tap");
+      finish(r.already ? carryOf(snap.current, tierRef.current) : Math.max(0, Number(r.carry_over) || 0), r.already ? "code" : "tap");
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -266,32 +288,52 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, regist
   const close = () => { if (IS_IOS) cancelNfc(); onClose(); };
   const showCode = () => { if (IS_IOS) cancelNfc(); setTapError(null); setStage("revealed"); };
   const backToStamp = () => { setTapError(null); setTapState(IS_IOS ? "idle" : "waiting"); setStage("tap"); };
+  // v10: kunden ångrar en sparad mindre belöning och samlar vidare.
+  const handleCancel = async () => {
+    if (IS_IOS) cancelNfc();
+    busyRef.current = true;
+    const r = await cancelSavedReward(c.slug);
+    busyRef.current = false;
+    if (r.ok) {
+      Haptics.selectionAsync();
+      if (onCancelled) onCancelled(c.slug);
+      onClose();
+    } else {
+      setTapError({ kind: "network" });
+    }
+  };
+  const opt = optionFor(c, tierAt);
+  const shown = tierAt != null ? { ...c, reward: opt.title } : c;   // rubriken = vald belöning
+  const canCancel = tierAt != null && !opt.full;
 
   const t = toneFor(c.ink);
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={close}>
       {stage === "loading" || stage === "locked" ? (
-        <LockedSheet card={c} tone={t} loading={stage === "loading"} saving={saving || tapState === "reading"} saveFailed={saveFailed} tapError={tapError} onRedeem={handleRedeem} onClose={close} />
+        <LockedSheet card={c} tone={t} tierAt={tierAt} onPickTier={setTierAt} loading={stage === "loading"} saving={saving || tapState === "reading"} saveFailed={saveFailed} tapError={tapError} onRedeem={handleRedeem} onClose={close} />
       ) : stage === "tap" ? (
-        <TapScreen card={c} tone={t} state={tapState} error={tapError} offline={offline} onScan={scanIos} onShowCode={showCode} onClose={close} />
+        <TapScreen card={shown} tone={t} state={tapState} error={tapError} offline={offline} onScan={scanIos} onShowCode={showCode} onCancel={canCancel ? handleCancel : null} onClose={close} />
       ) : stage === "revealed" || stage === "dissolve" ? (
-        <CodeScreen card={c} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onUseStamp={backToStamp} onClose={close} />
+        <CodeScreen card={shown} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onUseStamp={backToStamp} onClose={close} />
       ) : (
-        <RedeemedScreen card={c} tone={t} carry={carry} via={via} at={redeemedAt} onClose={close} />
+        <RedeemedScreen card={c} tone={t} carry={carry} before={before} via={via} at={redeemedAt} onClose={close} />
       )}
     </Modal>
   );
 }
 
 /* ────────────── 1. LÅST — ARK MED "LÖS IN" ────────────── */
-function LockedSheet({ card, tone: t, loading, saving, saveFailed, tapError, onRedeem, onClose }) {
+function LockedSheet({ card, tone: t, tierAt, onPickTier, loading, saving, saveFailed, tapError, onRedeem, onClose }) {
   const insets = useSafeAreaInsets();
   const rise = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(rise, { toValue: 1, friction: 9, tension: 60, useNativeDriver: true }).start();
   }, []);
   const needed = Math.max(1, card.needed || 1);
-  const carry = Math.min(carryOf(card), needed);
+  const carry = Math.min(carryOf(card, tierAt), needed);
+  const options = rewardOptions(card);
+  const picking = options.length > 1;                  // v10: kunden väljer belöning
+  const title = picking ? optionFor(card, tierAt).title : card.reward;
 
   return (
     <View style={{ flex: 1, justifyContent: "flex-end" }}>
@@ -309,7 +351,7 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, tapError, onR
           </Shape>
           <View style={{ flex: 1 }}>
             <Text numberOfLines={1} style={{ fontFamily: FONT.medium, fontSize: 14, color: T.inkSoft }}>{card.name}</Text>
-            <Text style={{ fontFamily: FONT.title, fontSize: 24, lineHeight: 30, color: T.ink }}>{card.reward}</Text>
+            <Text style={{ fontFamily: FONT.title, fontSize: 24, lineHeight: 30, color: T.ink }}>{title}</Text>
           </View>
         </View>
 
@@ -319,8 +361,9 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, tapError, onR
           </View>
         ) : (
           <View>
-            <View style={{ marginTop: 20 }}>
-              <StepRow tone={t} icon="phone" text="Tryck på Lös in när du står i kassan" />
+            {picking && <RewardPicker card={card} tone={t} options={options} tierAt={tierAt} onPick={onPickTier} />}
+            <View style={{ marginTop: picking ? 8 : 20 }}>
+              {!picking && <StepRow tone={t} icon="phone" text="Tryck på Lös in när du står i kassan" />}
               <StepRow tone={t} icon="nfc" text="Personalen håller butikens stämpel mot telefonen" />
               <StepRow tone={t} icon="reset" text={"Kortet börjar om på " + carry + "/" + needed + " när belöningen är inlöst"} />
             </View>
@@ -349,6 +392,43 @@ function LockedSheet({ card, tone: t, loading, saving, saveFailed, tapError, onR
   );
 }
 
+// Välj belöning (v10): de mindre belöningarna och huvudbelöningen. Belöningar kunden
+// inte nått än visas men går inte att välja ("3 kvar").
+function RewardPicker({ card, tone: t, options, tierAt, onPick }) {
+  const stamps = Math.max(0, card.stamps || 0);
+  const selected = tierAt != null ? tierAt : (options[options.length - 1] || {}).at;
+  return (
+    <View accessibilityRole="radiogroup" style={{ marginTop: 18, gap: 8 }}>
+      {options.map((o) => {
+        const reached = stamps >= o.at;
+        const on = reached && o.at === selected;
+        const rest = Math.max(0, stamps - o.at);
+        return (
+          <Pressable key={o.at} disabled={!reached} onPress={() => { Haptics.selectionAsync(); onPick(o.at); }}
+            accessibilityRole="radio" accessibilityState={{ checked: on, disabled: !reached }}
+            accessibilityLabel={o.text + (reached ? ", " + o.at + " stämplar" : ", " + (o.at - stamps) + " stämplar kvar")}
+            style={({ pressed }) => ({ minHeight: 60, paddingVertical: 10, paddingLeft: 10, paddingRight: 14, borderRadius: 18, borderWidth: 2,
+              borderColor: on ? t.primary : T.outline, backgroundColor: on ? t.container : "transparent",
+              flexDirection: "row", alignItems: "center", gap: 12, opacity: reached ? (pressed ? 0.85 : 1) : 0.55 })}>
+            <Shape kind="cookie9" size={38} color={reached ? t.primary : t.deco}>
+              <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: reached ? "#FFFFFF" : t.muted }}>{o.at}</Text>
+            </Shape>
+            <View style={{ flex: 1 }}>
+              <Text numberOfLines={1} style={{ fontFamily: FONT.semibold, fontSize: 16, lineHeight: 21, color: T.ink }}>{o.text}</Text>
+              <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: T.inkSoft }}>
+                {reached ? (rest > 0 ? rest + (rest === 1 ? " stämpel" : " stämplar") + " blir kvar på kortet" : "Kortet börjar om från noll") : (o.at - stamps) + " kvar"}
+              </Text>
+            </View>
+            <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: on ? t.primary : T.outline, alignItems: "center", justifyContent: "center" }}>
+              {on && <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: t.primary }} />}
+            </View>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function StepRow({ tone: t, icon, text }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 14, minHeight: 56 }}>
@@ -363,7 +443,7 @@ function StepRow({ tone: t, icon, text }) {
 /* ────────────── 2. LÖS IN MED STÄMPELN ────────────── */
 // state: waiting (Android lyssnar) | scanning (iOS-arket är uppe) | reading (servern
 // löser in) | idle (iOS: väntar på att kunden trycker Skanna)
-function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, onClose }) {
+function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, onCancel, onClose }) {
   const insets = useSafeAreaInsets();
   const reduce = useReduceMotion();
   const pop = useRef(new Animated.Value(0)).current;
@@ -451,6 +531,12 @@ function TapScreen({ card, tone: t, state, error, offline, onScan, onShowCode, o
         <Icon name="keyboard" size={20} color={T.ink} />
         <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: T.ink }}>Visa sifferkod i stället</Text>
       </Pressable>
+      {onCancel && !reading && (
+        <Pressable onPress={onCancel} accessibilityRole="button"
+          style={({ pressed }) => ({ marginTop: 6, height: 44, alignSelf: "center", paddingHorizontal: 16, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+          <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: T.inkSoft }}>Ångra – samla vidare</Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -597,14 +683,17 @@ function Digit({ ch, delay, dissolving, size, box, color, splash }) {
 }
 
 /* ────────────── 3. INLÖST ────────────── */
-function RedeemedScreen({ card, tone: t, carry = 0, via = "code", at = null, onClose }) {
+function RedeemedScreen({ card, tone: t, carry = 0, before = null, via = "code", at = null, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const tick = useRef(new Animated.Value(0)).current;
   const rise = useRef(new Animated.Value(0)).current;
   const needed = Math.max(1, card.needed || 1);
-  const start = Math.max(0, Math.min(carry, needed));
-  const lifts = needed - start;   // stämplar som lyfter från kortet
+  // Antal på kortet när belöningen löstes in (en mindre belöning kan lösas in före fullt kort)
+  const had = before == null ? needed : Math.max(0, Math.min(before, needed));
+  const start = Math.max(0, Math.min(carry, had));
+  const lifts = had - start;   // stämplar som lyfter från kortet
+  const nextAt = ((card.tiers || [])[0] || {}).at || needed;
   const [reset, setReset] = useState(lifts === 0);
 
   useEffect(() => {
@@ -617,7 +706,7 @@ function RedeemedScreen({ card, tone: t, carry = 0, via = "code", at = null, onC
     }
     return () => timers.forEach(clearTimeout);
   }, []);
-  const exits = Array.from({ length: lifts }, (_, k) => ({ index: needed - 1 - k, delay: RESET_AT + k * LIFT_GAP }));
+  const exits = Array.from({ length: lifts }, (_, k) => ({ index: had - 1 - k, delay: RESET_AT + k * LIFT_GAP }));
   const slide = (from) => ({ opacity: rise, transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] });
 
   return (
@@ -661,13 +750,13 @@ function RedeemedScreen({ card, tone: t, carry = 0, via = "code", at = null, onC
             </Shape>
             <View style={{ flex: 1 }}>
               <Text numberOfLines={1} style={{ fontFamily: FONT.title, fontSize: 16, color: t.onContainer }}>{card.name}</Text>
-              <Text style={{ fontFamily: FONT.regular, fontSize: 13, color: t.muted }}>Nästa belöning efter {needed} stämplar</Text>
+              <Text style={{ fontFamily: FONT.regular, fontSize: 13, color: t.muted }}>Nästa belöning efter {nextAt} stämplar</Text>
             </View>
-            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>{reset ? start : needed}/{needed}</Text>
+            <Text style={{ fontFamily: FONT.bold, fontSize: 15, color: t.primary }}>{reset ? start : had}/{needed}</Text>
           </View>
           <View style={{ marginTop: 12 }}>
             {/* Kortet börjar om: stämplarna lyfter en i taget, överskottet blir kvar */}
-            <StampRow total={needed} filled={needed} tone={t} size={24} exits={exits} />
+            <StampRow total={needed} filled={had} tone={t} size={24} exits={exits} marks={(card.tiers || []).map((x) => x.at - 1)} />
           </View>
         </Animated.View>
       </View>

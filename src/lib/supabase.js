@@ -48,10 +48,14 @@ export async function tapToken(token) {
 
 // Spara belöning → { ok, code }. Servern kräver fullt kort och returnerar
 // samma kod om belöningen redan är sparad. Nät-/serverfel → { ok: false }.
-export async function saveReward(cafeSlug) {
+// tierAt (v10): vald belöning hos butiker med flera belöningar. Skickas bara då —
+// utan nivå fungerar anropet även mot servrar före v10 (hela kortet).
+export async function saveReward(cafeSlug, tierAt) {
   try {
     const device_id = await getDeviceId();
-    const { data, error } = await supabase.rpc("save_reward", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+    const params = { p_device_id: device_id, p_cafe_slug: cafeSlug };
+    if (tierAt != null) params.p_tier_at = tierAt;
+    const { data, error } = await supabase.rpc("save_reward", params);
     if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
     return data;
   } catch {
@@ -72,9 +76,23 @@ export async function getCurrentSavedCode(cafeSlug) {
     const device_id = await getDeviceId();
     const { data, error } = await supabase.rpc("current_saved_code", { p_device_id: device_id, p_cafe_slug: cafeSlug });
     if (error || !data || data.ok !== true) return { ok: false };
-    return { ok: true, code: data.code || null };
+    // tierAt (v10): vilken belöning som är sparad (null före v10 = hela kortet)
+    return { ok: true, code: data.code || null, tierAt: data.tier_at == null ? null : Number(data.tier_at) };
   } catch {
     return { ok: false };
+  }
+}
+
+// Kunden ångrar en sparad belöning och samlar vidare (v10). { ok, stamps } eller
+// { ok: false, error: "nothing_saved" | "network" … }.
+export async function cancelSavedReward(cafeSlug) {
+  try {
+    const device_id = await getDeviceId();
+    const { data, error } = await supabase.rpc("cancel_saved_reward", { p_device_id: device_id, p_cafe_slug: cafeSlug });
+    if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
+    return data;
+  } catch {
+    return { ok: false, error: "network" };
   }
 }
 
