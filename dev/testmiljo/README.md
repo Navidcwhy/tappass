@@ -4,7 +4,8 @@ Sparad 2026-11-13 så att en ny Claude-session kan fortsätta utan att bygga om 
 Används i en **kopia** av repot, aldrig i själva appen (filerna här byggs inte in).
 
 ## Innehåll
-- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 186 tester, android + ios (två bara iOS, ett bara Android).
+- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 187 tester: 185 körs på Android, 186 på iOS (resten bara på den andra plattformen).
+  (Taggverktygets tester togs bort med verktyget 2026-11-14 — finns i commit `edef21f` på den här grenen.)
 - `app/jest.*.config.js`, `app/jest.setup.js` — konfiguration och mockar (haptik, svg, ikoner, AsyncStorage).
 - `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|profil|konto|konto2|fodelsedag|bjudin|bjudin2|sdm|stack|win|quiet|home …`,
   `&d=<ms>` innan tappet svarar), NFC och NFC-status för webbförhandsvisningen.
