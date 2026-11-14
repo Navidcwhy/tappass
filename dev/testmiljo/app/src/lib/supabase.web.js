@@ -42,6 +42,20 @@ const OFFERS = [{ cafe: MIYABI, stamps: 5, is_new: false }, { cafe: BRYGGAN, sta
 let claimed = false;
 let spun = null;   // senaste snurret — hjulets läge efteråt (som servern)
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+// ?s=konto: konto (v14). Den här telefonen har Café Linnea 3 och Bryggan 2; kontot (från en
+// annan telefon) har Linnea 4 och Miyabi 5 — inloggningen slår ihop dem. ?s=konto2: inloggad.
+let kontoPhase = S === "konto2" ? "account" : "phone";   // phone | account | empty
+const KONTO = S === "konto" || S === "konto2";
+export async function getAuthMethods() { await delay(40); return { email: KONTO, apple: false, google: false }; }
+export async function accountStatus() { await delay(60); return { ok: true, linked: kontoPhase === "account", email: "a***@exempel.se" }; }
+export async function sendLoginCode() { await delay(700); return { ok: true }; }
+export async function verifyLoginCode() { await delay(600); return { ok: true }; }
+export async function linkAccount() { await delay(800); kontoPhase = "account"; return { ok: true, device_id: "d_konto", created: false, merged: true, moved_stamps: 5 }; }
+export async function rotateAccountKey() { await delay(500); return { ok: true, device_id: "k_ny" }; }
+export async function deleteAccount() { await delay(500); kontoPhase = "empty"; return { ok: true, deleted: true }; }
+export const endAuthSession = async () => {};
+export const setDeviceId = async (id) => id;
+export const newDeviceId = async () => { kontoPhase = "empty"; return "d_ny"; };
 export const supabase = {};
 export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
@@ -100,6 +114,9 @@ export async function redeemByTap(slug, token) {
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
+  if (KONTO) return kontoPhase === "empty" ? [] : kontoPhase === "phone"
+    ? [{ cafe: LINNEA, stamps: 3, pending: false, bonus_expires_at: null }, { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null }]
+    : [{ cafe: LINNEA, stamps: 7, pending: false, bonus_expires_at: null }, { cafe: MIYABI, stamps: 5, pending: false, bonus_expires_at: null }, { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null }];
   if (S === "tiers") return [
     { cafe: LINNEA_T, stamps: tierStamps, pending: !!savedCode, pending_tier: savedCode ? savedTier : null, bonus_expires_at: null },
     { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },

@@ -16,11 +16,15 @@ jest.mock("../src/lib/nfc", () => ({
 jest.mock("../src/lib/useNfcStatus", () => ({ useNfcStatus: () => ({ supported: true, enabled: true }) }));
 jest.mock("../src/lib/cache", () => ({ readCache: jest.fn(() => Promise.resolve(null)), writeCache: jest.fn() }));
 jest.mock("../src/lib/prefs", () => ({
+  getAccount: jest.fn(() => Promise.resolve(null)), setAccount: jest.fn(), clearAccount: jest.fn(),
+  accountHintDismissed: jest.fn(() => Promise.resolve(false)), dismissAccountHint: jest.fn(),
   hasOnboarded: jest.fn(() => Promise.resolve(true)), markOnboarded: jest.fn(),
   getWheelCity: jest.fn(() => Promise.resolve("Stockholm")), setWheelCity: jest.fn(),
   hasFirstStamp: jest.fn(() => Promise.resolve(true)), markFirstStamp: jest.fn(),
 }));
 jest.mock("../src/lib/supabase", () => ({
+  getAuthMethods: jest.fn(() => Promise.resolve({ email: false, apple: false, google: false })),
+  accountStatus: jest.fn(() => Promise.resolve({ ok: true, linked: false })), newDeviceId: jest.fn(() => Promise.resolve("d_ny")),
   tapToken: jest.fn(), saveReward: jest.fn(), loadWallet: jest.fn(), loadCafes: jest.fn(),
   wheelStatus: jest.fn(), spinWheel: jest.fn(), claimWheelPrize: jest.fn(), getCurrentSavedCode: jest.fn(),
   redeemByTap: jest.fn(), cancelSavedReward: jest.fn(),
