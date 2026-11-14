@@ -104,8 +104,18 @@ export async function ackInvites() { inviteUnseen = []; return { ok: true }; }
 export const supabase = {};
 export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
-export async function tapToken() {
+const usedSun = new Set();   // dynamiska taggar (v17): varje läsning godkänns en gång
+let sdmStamps = 3;
+export async function tapToken(token, sun) {
   await delay(D);
+  if (S === "sdm") {
+    if (!sun) return { ok: false, error: "sdm_required" };
+    if (sun.c === "0000000000000000") return { ok: false, error: "sdm_invalid" };
+    if (usedSun.has(sun.e + sun.c)) return { ok: false, error: "replay" };
+    usedSun.add(sun.e + sun.c);
+    sdmStamps += 1;
+    return { ok: true, cafe: MIYABI, stamps: sdmStamps, complete: false, stamps_added: 1, bonus_applied: false, quiet_applied: false, carry_over: 0 };
+  }
   if (S === "bjudin2") { inviteEntered = { status: "rewarded", cafe_slug: "linnea", cafe_name: "Café Linnea" }; return { ok: true, cafe: LINNEA, stamps: 3, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
   if (S === "tiers") { tierStamps += 1; return { ok: true, cafe: LINNEA_T, stamps: tierStamps, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
   if (S === "niva") return { ok: true, cafe: BRYGGAN_V, stamps: 3, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
@@ -159,6 +169,11 @@ export async function redeemByTap(slug, token) {
 }
 export async function loadWallet() {
   await delay(50);
+  if (S === "sdm") return [
+    { cafe: MIYABI, stamps: sdmStamps, pending: false, bonus_expires_at: null },
+    { cafe: LINNEA, stamps: 6, pending: false, bonus_expires_at: null },
+    { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },
+  ];
   if (S === "first") return [];
   if (S === "bjudin2") return inviteEntered && inviteEntered.status === "rewarded" ? [{ cafe: LINNEA, stamps: 3, pending: false, bonus_expires_at: null }] : [];
   if (S === "bjudin") return [

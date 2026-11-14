@@ -184,6 +184,16 @@ iosOnly("iOS: Skanna stämpeln läser och löser in", async () => {
   expect(sb.redeemByTap).toHaveBeenCalledWith("miyabi", "miyabi-01");
 });
 
+iosOnly("iOS: en dynamisk tagg (v17) löser in med bara token", async () => {
+  nfc.readToken.mockResolvedValueOnce("https://tappass.se/t/miyabi-01?e=ef963ff7828658a599f3041510671e88&c=94eed9ee65337086");
+  sb.redeemByTap.mockResolvedValue({ ok: true, carry_over: 0, stamps: 0 });
+  const { tree } = await open();
+  await until(() => text(tree).includes("Skanna stämpeln"), "knappen");
+  await press(tree, "Skanna stämpeln");
+  await until(() => text(tree).includes("Inlöst!"), "inlöst");
+  expect(sb.redeemByTap).toHaveBeenCalledWith("miyabi", "miyabi-01");
+});
+
 test("felbesked i klartext", () => {
   expect(tapErrorText({ kind: "wrong_tag", expected: "Miyabi" }, "X")).toEqual({ title: "Fel stämpel", text: "Använd Miyabi-stämpeln." });
   expect(tapErrorText({ kind: "unknown_tag" }, "Miyabi").text).toBe("Håll telefonen mot Miyabi-stämpeln.");

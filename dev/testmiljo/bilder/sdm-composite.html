@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --bg:#F7F4EE; --ink:#1C1B18; --soft:#5E5A52; --mute:#8A857B; --teal:#1B5A66; --tealc:#C7E5EA; --ok:#2F6B3A; --okc:#DDEFD8; --bad:#9A2A1E; --badc:#F9DAD5; --line:#E4DED2; --lime:#C9E06A; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { width:1200px; background:var(--bg); color:var(--ink); font-family:Inter, system-ui, sans-serif; padding:44px 48px 40px; }
+  h1 { font-size:34px; line-height:40px; letter-spacing:-0.4px; font-weight:700; }
+  .sub { margin-top:8px; font-size:17px; line-height:25px; color:var(--soft); max-width:900px; }
+  .cols { display:grid; grid-template-columns: 1fr 1.55fr; gap:22px; margin-top:28px; }
+  .panel { background:#fff; border:1px solid var(--line); border-radius:22px; padding:20px 22px; }
+  .ph { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; letter-spacing:1.2px; color:var(--mute); text-transform:uppercase; }
+  .dot { width:10px; height:10px; border-radius:5px; }
+  .row { display:grid; grid-template-columns: 62px 1fr auto; align-items:center; gap:10px; padding:11px 0; border-top:1px solid var(--line); }
+  .row:first-of-type { border-top:none; }
+  .lab { font-size:13px; color:var(--mute); font-weight:600; }
+  code { font-family: "DejaVu Sans Mono", ui-monospace, monospace; font-size:13.5px; color:var(--ink); }
+  code b { color:var(--teal); font-weight:700; }
+  .pill { font-size:13px; font-weight:700; padding:6px 10px; border-radius:999px; white-space:nowrap; }
+  .ok { background:var(--okc); color:var(--ok); }
+  .bad { background:var(--badc); color:var(--bad); }
+  .warn { background:#F3E7C9; color:#7A5410; }
+  .note { margin-top:12px; font-size:14px; line-height:21px; color:var(--soft); }
+  .phones { display:grid; grid-template-columns: repeat(3, 1fr); gap:22px; margin-top:26px; }
+  .phone { text-align:center; }
+  .phone img { width:100%; border-radius:30px; border:1px solid var(--line); box-shadow:0 10px 28px rgba(0,0,0,0.10); display:block; }
+  .cap { margin-top:12px; font-size:16px; font-weight:700; }
+  .cap2 { margin-top:3px; font-size:14px; color:var(--soft); }
+  .foot { margin-top:26px; display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { font-size:14px; font-weight:600; padding:8px 12px; border-radius:12px; background:#fff; border:1px solid var(--line); color:var(--soft); }
+  .chip strong { color:var(--ink); }
+</style>
+</head>
+<body>
+  <h1>Dynamiska taggar (NTAG 424 DNA)</h1>
+  <p class="sub">Varje tapp ger en ny adress som bara stämpeln kan räkna fram. Servern godkänner varje läsning en gång — en kopierad eller påhittad länk ger ingen stämpel.</p>
+
+  <div class="cols">
+    <div class="panel">
+      <div class="ph"><span class="dot" style="background:#C9B9A0"></span>I dag: statisk tagg</div>
+      <div style="margin-top:8px">
+        <div class="row"><span class="lab">Tapp 1</span><code>tappass.se/t/miyabi-01</code><span></span></div>
+        <div class="row"><span class="lab">Tapp 2</span><code>tappass.se/t/miyabi-01</code><span></span></div>
+        <div class="row"><span class="lab">Hemma</span><code>tappass.se/t/miyabi-01</code><span class="pill warn">Stämpel</span></div>
+      </div>
+      <p class="note">Samma kod varje gång. Den som känner den kan stämpla hemifrån — väntetiden bromsar, men stoppar inte.</p>
+    </div>
+    <div class="panel">
+      <div class="ph"><span class="dot" style="background:var(--teal)"></span>Dynamisk tagg</div>
+      <div style="margin-top:8px">
+        <div class="row"><span class="lab">Tapp 1</span><code>…/miyabi-01?e=<b>4F0B9C27</b>…&amp;c=<b>8A1DE54B</b>…</code><span class="pill ok">Stämpel · läsning 61</span></div>
+        <div class="row"><span class="lab">Tapp 2</span><code>…/miyabi-01?e=<b>D27A11F0</b>…&amp;c=<b>03C9B7E2</b>…</code><span class="pill ok">Stämpel · läsning 62</span></div>
+        <div class="row"><span class="lab">Kopia</span><code>…/miyabi-01?e=<b>4F0B9C27</b>…&amp;c=<b>8A1DE54B</b>…</code><span class="pill bad">Redan använd</span></div>
+        <div class="row"><span class="lab">Påhittad</span><code>…/miyabi-01?e=<b>9C27E54B</b>…&amp;c=<b>00000000</b>…</code><span class="pill bad">Nekas</span></div>
+      </div>
+      <p class="note"><b>e</b> = taggens id och läsräknare, krypterade. <b>c</b> = kontrollsumma som kräver taggens nyckel. Kontrollen följer NXP AN12196.</p>
+    </div>
+  </div>
+
+  <div class="phones">
+    <div class="phone"><img src="shots/sdm-1.png"><div class="cap">Äkta tapp → stämpel</div><div class="cap2">Som i dag för kunden</div></div>
+    <div class="phone"><img src="shots/sdm-2.png"><div class="cap">Påhittad länk → nekas</div><div class="cap2">Ingen stämpel, tydligt besked</div></div>
+    <div class="phone"><img src="shots/sdm-3.png"><div class="cap">Länk utan e/c → läs av i kassan</div><div class="cap2">Gäller taggar som bara är dynamiska</div></div>
+  </div>
+
+  <div class="foot">
+    <span class="chip"><strong>131</strong> serverkontroller mot NXP:s testvärden</span>
+    <span class="chip"><strong>186</strong> apptester</span>
+    <span class="chip">Äldre appbyggen läser dem också</span>
+    <span class="chip">Tagg ca <strong>10 kr</strong></span>
+    <span class="chip"><strong>Inte körd</strong> i produktion</span>
+  </div>
+</body>
+</html>
