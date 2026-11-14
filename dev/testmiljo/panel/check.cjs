@@ -362,7 +362,8 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await sec.getByText("128 kunder har besökt er senaste 12 månaderna.").waitFor();
     ok(await sec.getByText("en dag med stämpel räknas som ett besök", { exact: false }).isVisible(), "förklaring");
     const order = await page.evaluate(() => [...document.querySelectorAll("section h3")].map((h) => h.textContent));
-    ok(order.indexOf("Stamgäster") === order.indexOf("Belöningar") + 1, "direkt efter Belöningar: " + order.join(" / "));
+    // v15: Födelsedagspresent ligger mellan Belöningar och Stamgäster
+    ok(order.indexOf("Stamgäster") === order.indexOf("Belöningar") + 2 && order[order.indexOf("Belöningar") + 1] === "Födelsedagspresent", "efter Belöningar och Födelsedagspresent: " + order.join(" / "));
     await page.waitForTimeout(900);   // talen räknas upp
     const tiles = await sec.locator(".grid > div").allInnerTexts();
     eq(tiles.map((x) => x.replace(/\s+/g, " ").trim()), ["GULD 3 från 25 besök", "SILVER 12 från 10 besök", "BRONS 34 från 3 besök"], "Guld, Silver, Brons med antal");
@@ -644,6 +645,78 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     const pf = secOf(page, "Profile");
     await pf.getByText("Café Linnea · Stockholm · 10 stamps for the reward").waitFor();
     ok(await pf.getByRole("button", { name: /^Save( profile)?$/ }).isVisible() && await pf.getByLabel(/^Type of place/).isVisible(), "engelska: profil");
+    await ctx.close();
+  }
+
+  // 15. Födelsedagspresent (v15): erbjud, spara, stäng av, fel, utgången kod, engelska, 360 px
+  {
+    const { ctx, page, state, errors } = await open(browser);
+    const bd = secOf(page, "Födelsedagspresent");
+    await bd.getByText("Erbjud födelsedagspresent").waitFor();
+    ok(true, "födelsedag: sektionen visas");
+    const order = await page.evaluate(() => [...document.querySelectorAll("h3")].map((h) => h.textContent.trim()));
+    ok(order.indexOf("Födelsedagspresent") === order.indexOf("Belöningar") + 1 && order.indexOf("Stamgäster") === order.indexOf("Födelsedagspresent") + 1, "ordning: " + order.join(" / "));
+    ok(!(await bd.getByText("Inlösta 30 dagar").isVisible()), "ingen statistik när presenten inte erbjuds");
+    eq(await bd.locator("input:not([type=checkbox])").count(), 0, "av från start: inga fält");
+    await bd.getByLabel("Erbjud födelsedagspresent").check();
+    const gift = bd.getByLabel(/^Present/);
+    await gift.fill("x");
+    ok(await bd.getByRole("button", { name: "Spara födelsedagspresent" }).isDisabled(), "för kort text: spara avstängd");
+    await gift.fill("En kaka på huset");
+    await bd.getByLabel(/^Värde i kronor/).fill("35");
+    ok(await bd.getByText("16/60").isVisible(), "räknaren");
+    await bd.getByRole("button", { name: "Spara födelsedagspresent" }).click();
+    await bd.getByText("Sparat").waitFor();
+    eq(state.calls.filter((c) => c.fn === "merchant_set_birthday").pop().body, { p_token: "demo", p_text: "En kaka på huset", p_value_kr: 35 }, "sparar text och värde");
+    await bd.getByText("Inlösta 30 dagar").waitFor();
+    ok(await bd.getByText("Fyller år kommande 30 dagar").isVisible(), "statistik när presenten erbjuds");
+    await bd.getByLabel("Erbjud födelsedagspresent").uncheck();
+    await bd.getByRole("button", { name: "Spara födelsedagspresent" }).click();
+    await page.waitForTimeout(500);
+    eq(state.calls.filter((c) => c.fn === "merchant_set_birthday").pop().body, { p_token: "demo", p_text: null, p_value_kr: null }, "avstängd: p_text null");
+    // Presentkoder i kodrutan
+    await page.locator("input[autocomplete=one-time-code]").fill("047123");
+    await page.getByRole("button", { name: "Bekräfta inlösen" }).click();
+    await page.getByText("Lämna ut: Födelsedagspresent: En kaka på huset").waitFor();
+    ok(true, "presentkod: Lämna ut");
+    await page.waitForTimeout(3300);
+    await page.locator("input[autocomplete=one-time-code]").fill("099999");
+    await page.getByRole("button", { name: "Bekräfta inlösen" }).click();
+    await page.getByText("Födelsedagspresenten har gått ut.").waitFor();
+    ok(true, "utgången presentkod");
+    eq(errors, [], "inga sidfel (födelsedag)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { birthday: { text: "En kaka på huset", value_kr: null, redeemed_30d: 2, redeemed_total: 9, upcoming_30d: 4 }, rejectBirthday: "invalid_value" });
+    const bd = secOf(page, "Födelsedagspresent");
+    await bd.getByLabel(/^Present/).waitFor();
+    eq(await bd.getByLabel(/^Present/).inputValue(), "En kaka på huset", "befintlig present läses");
+    const stats = await bd.innerText();
+    ok(/2[\s\S]*9[\s\S]*4/.test(stats.replace(/\d+\/60/, "")), "statistiken 2 / 9 / 4");
+    await bd.getByRole("button", { name: "Spara födelsedagspresent" }).click();
+    await bd.getByText("Ange ett heltal 1–10 000 kr.").waitFor();
+    ok(true, "serverns invalid_value vid värdet");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failBirthday: true });
+    await page.getByText("Kunde inte hämta födelsedagspresenten just nu.").waitFor();
+    ok(await page.getByText("Belöningar", { exact: true }).isVisible(), "resten av panelen fungerar utan v15");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en", birthday: { text: "A cookie", value_kr: 30, redeemed_30d: 1, redeemed_total: 1, upcoming_30d: 2 } });
+    const bd = secOf(page, "Birthday gift");
+    await bd.getByText("Offer a birthday gift").waitFor();
+    ok(await bd.getByRole("button", { name: "Save birthday gift" }).isVisible() && await bd.getByText("Birthdays next 30 days").isVisible(), "engelska: födelsedagspresent");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800, birthday: { text: "En kaka på huset", value_kr: 35, redeemed_30d: 2, redeemed_total: 9, upcoming_30d: 4 } });
+    await secOf(page, "Födelsedagspresent").getByLabel(/^Present/).waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "födelsedag: ingen sidledsskroll vid 360 px (" + sw + ")");
     await ctx.close();
   }
 

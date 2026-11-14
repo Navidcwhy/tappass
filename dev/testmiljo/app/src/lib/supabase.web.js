@@ -44,8 +44,8 @@ let spun = null;   // senaste snurret — hjulets läge efteråt (som servern)
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 // ?s=konto: konto (v14). Den här telefonen har Café Linnea 3 och Bryggan 2; kontot (från en
 // annan telefon) har Linnea 4 och Miyabi 5 — inloggningen slår ihop dem. ?s=konto2: inloggad.
-let kontoPhase = S === "konto2" ? "account" : "phone";   // phone | account | empty
-const KONTO = S === "konto" || S === "konto2";
+let kontoPhase = S === "konto2" || S === "fodelsedag" ? "account" : "phone";   // phone | account | empty
+const KONTO = S === "konto" || S === "konto2" || S === "fodelsedag";
 export async function getAuthMethods() { await delay(40); return { email: KONTO, apple: false, google: false }; }
 export async function accountStatus() { await delay(60); return { ok: true, linked: kontoPhase === "account", email: "a***@exempel.se" }; }
 export async function sendLoginCode() { await delay(700); return { ok: true }; }
@@ -56,6 +56,36 @@ export async function deleteAccount() { await delay(500); kontoPhase = "empty"; 
 export const endAuthSession = async () => {};
 export const setDeviceId = async (id) => id;
 export const newDeviceId = async () => { kontoPhase = "empty"; return "d_ny"; };
+// ?s=fodelsedag: födelsedagspresent (v15). Kontot är inloggat och födelsedagen är i dag;
+// Café Linnea (en kaka) och Miyabi (två makirullar) erbjuder present, Bryggan inte.
+const FODELSEDAG = S === "fodelsedag";
+const ymd = (d) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+const LINNEA_B = { ...LINNEA, birthday_text: "En kaka på huset", birthday_value_kr: 35 };
+const MIYABI_B = { ...MIYABI, birthday_text: "Två makirullar", birthday_value_kr: null };
+const giftState = { linnea: "available", miyabi: "available" };
+const giftAt = {};
+export async function birthdayStatus() {
+  await delay(60);
+  if (!FODELSEDAG && !KONTO) return { ok: true, unavailable: true, linked: false, birthday: null, window: null, gifts: [] };
+  if (!FODELSEDAG) return { ok: true, linked: kontoPhase === "account", birthday: null, next_gift: null, window: null, gifts: [] };
+  const now = new Date();
+  const [y, m, d] = ymd(now).split("-").map(Number);
+  const to = ymd(new Date(now.getTime() + 6 * 86400000));
+  const gift = (cafe, reward, value) => ({ cafe_slug: cafe.slug, cafe_name: cafe.name, reward, value_kr: value, status: giftState[cafe.slug],
+    code: giftState[cafe.slug] === "saved" ? "047123" : null, redeemed_at: giftAt[cafe.slug] || null, valid_until: to + "T23:00:00Z" });
+  return { ok: true, linked: true, birthday: { month: m, day: d }, next_gift: ymd(now), window: { from: ymd(now), to },
+    gifts: [gift(LINNEA_B, "En kaka på huset", 35), gift(MIYABI_B, "Två makirullar", null)] };
+}
+export async function setBirthday(month, day) { await delay(400); return { ok: true, birthday: month ? { month, day } : null, next_gift: month ? "2027-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0") : null }; }
+export async function claimBirthday(slug) { await delay(350); if (giftState[slug] === "available") giftState[slug] = "saved"; return { ok: true, code: "047123", reward: slug === "miyabi" ? "Två makirullar" : "En kaka på huset" }; }
+export async function getBirthdayCode(slug) { await delay(80); return { ok: true, code: giftState[slug] === "saved" ? "047123" : null, redeemed: giftState[slug] === "redeemed", redeemedAt: giftAt[slug] || null }; }
+export async function redeemBirthdayByTap(slug, token) {
+  await delay(500);
+  const got = String(token || "").replace(/-01$/, "");
+  if (got !== slug) return { ok: false, error: "wrong_tag", expected: slug === "miyabi" ? "Miyabi" : "Café Linnea", got: got === "miyabi" ? "Miyabi" : got === "linnea" ? "Café Linnea" : "Bryggans Bageri" };
+  giftState[slug] = "redeemed"; giftAt[slug] = new Date().toISOString();
+  return { ok: true, reward: slug === "miyabi" ? "Två makirullar" : "En kaka på huset", redeemed_at: giftAt[slug] };
+}
 export const supabase = {};
 export const getDeviceId = async () => "d_web_demo";
 const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter hemskärmen synas först i videor
@@ -114,6 +144,11 @@ export async function redeemByTap(slug, token) {
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
+  if (S === "fodelsedag") return [
+    { cafe: LINNEA_B, stamps: 4, pending: false, bonus_expires_at: null },
+    { cafe: MIYABI_B, stamps: 3, pending: false, bonus_expires_at: null },
+    { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },
+  ];
   if (KONTO) return kontoPhase === "empty" ? [] : kontoPhase === "phone"
     ? [{ cafe: LINNEA, stamps: 3, pending: false, bonus_expires_at: null }, { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null }]
     : [{ cafe: LINNEA, stamps: 7, pending: false, bonus_expires_at: null }, { cafe: MIYABI, stamps: 5, pending: false, bonus_expires_at: null }, { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null }];
@@ -155,7 +190,7 @@ export async function loadWallet() {
   if (claimed) rows.push({ cafe: LINNEA, stamps: 0, pending: false, bonus_expires_at: midnight(3) });
   return rows;
 }
-export const loadCafes = async () => (S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : S === "profil" ? [BRYGGAN_P, LINNEA_P, MIYABI_P] : S === "niva" ? [BRYGGAN_V, { ...LINNEA, reward_value_kr: 39 }, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
+export const loadCafes = async () => (S === "fodelsedag" ? [BRYGGAN, LINNEA_B, MIYABI_B] : S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : S === "profil" ? [BRYGGAN_P, LINNEA_P, MIYABI_P] : S === "niva" ? [BRYGGAN_V, { ...LINNEA, reward_value_kr: 39 }, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
 export async function wheelStatus() {
   await delay(80);
   const base = { ok: true, can_spin: true, next_spin_at: midnight(1), today: null, prize: null, bonuses: [], cities: CITIES };

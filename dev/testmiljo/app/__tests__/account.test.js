@@ -24,6 +24,7 @@ jest.mock("../src/lib/prefs", () => ({
   hasFirstStamp: jest.fn(() => Promise.resolve(true)), markFirstStamp: jest.fn(),
 }));
 jest.mock("../src/lib/supabase", () => ({
+  birthdayStatus: jest.fn(() => Promise.resolve({ ok: true, linked: false, birthday: null, window: null, gifts: [] })),
   getAuthMethods: jest.fn(), accountStatus: jest.fn(), newDeviceId: jest.fn(() => Promise.resolve("d_ny")),
   sendLoginCode: jest.fn(), verifyLoginCode: jest.fn(), linkAccount: jest.fn(), rotateAccountKey: jest.fn(),
   deleteAccount: jest.fn(), endAuthSession: jest.fn(() => Promise.resolve()),

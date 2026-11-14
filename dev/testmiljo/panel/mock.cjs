@@ -96,6 +96,10 @@ async function mock(page, opts = {}) {
       instagram: "", opening_hours: [], logo_version: 0, logo: null, updated_at: null },
     failProfile: !!opts.failProfile,
     rejectField: opts.rejectField ?? null,
+    // v15: födelsedagspresent
+    birthday: opts.birthday ?? { text: null, value_kr: null, redeemed_30d: 0, redeemed_total: 0, upcoming_30d: 3 },
+    failBirthday: !!opts.failBirthday,
+    rejectBirthday: opts.rejectBirthday ?? null,
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -208,7 +212,25 @@ async function mock(page, opts = {}) {
         state.profile = { ...state.profile, logo: { mime: body.p_mime, data: body.p_data }, logo_version: state.profile.logo_version + 1 };
         return json({ ok: true, logo_version: state.profile.logo_version }, 400);
       }
+      case "merchant_get_birthday":
+        if (state.failBirthday) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "Could not find the function public.merchant_get_birthday(p_token)" }) });
+        return json({ ok: true, ...state.birthday });
+      case "merchant_set_birthday": {
+        if (state.rejectBirthday) return json({ ok: false, error: state.rejectBirthday }, 250);
+        const txt = typeof body.p_text === "string" ? body.p_text.trim() : "";
+        if (!txt) { state.birthday = { ...state.birthday, text: null, value_kr: null }; return json({ ok: true, ...state.birthday }, 250); }
+        if (txt.length < 2 || txt.length > 60 || /[\u0000-\u001f]/.test(txt)) return json({ ok: false, error: "invalid_text" }, 250);
+        const v = body.p_value_kr;
+        if (v != null && !(Number.isInteger(v) && v >= 1 && v <= 10000)) return json({ ok: false, error: "invalid_value" }, 250);
+        state.birthday = { ...state.birthday, text: txt, value_kr: v ?? null };
+        return json({ ok: true, ...state.birthday }, 250);
+      }
       case "merchant_redeem_by_code":
+        // v15: presentkoder börjar med 0 (099999 = utgången)
+        if (/^0\d{5}$/.test(String(body.p_code))) {
+          if (body.p_code === "099999") return json({ ok: false, error: "expired" }, 300);
+          return json({ ok: true, code: body.p_code, kind: "birthday", carry_over: null, tier_at: null, reward: "Födelsedagspresent: En kaka på huset" }, 300);
+        }
         return json({ ok: true, code: body.p_code, carry_over: 0, tier_at: 5, reward: "Valfri kaka" }, 300);
       case "merchant_logout": return json({ ok: true });
       default: return json({ ok: false, error: "unknown_fn_" + fn });

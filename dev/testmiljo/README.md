@@ -4,9 +4,9 @@ Sparad 2026-11-13 så att en ny Claude-session kan fortsätta utan att bygga om 
 Används i en **kopia** av repot, aldrig i själva appen (filerna här byggs inte in).
 
 ## Innehåll
-- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 152 tester, android + ios (ett bara iOS).
+- `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 160 tester, android + ios (ett bara iOS).
 - `app/jest.*.config.js`, `app/jest.setup.js` — konfiguration och mockar (haptik, svg, ikoner, AsyncStorage).
-- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|profil|konto|konto2|stack|win|quiet|home …`,
+- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|profil|konto|konto2|fodelsedag|stack|win|quiet|home …`,
   `&d=<ms>` innan tappet svarar), NFC och NFC-status för webbförhandsvisningen.
   `window.__tappassTag("miyabi-01")` simulerar att en stämpel hålls mot telefonen (`?s=tap`: Bryggan = fel stämpel).
 - `rec3.js` — spelar in klipp i 780×1688 (390×844 @2x) via Chromes screencast, med klick
@@ -26,7 +26,8 @@ npx jest -c jest.android.config.js && npx jest -c jest.ios.config.js
 npx expo export --platform web --output-dir webdist
 node dev/testmiljo/serve.js "$PWD/webdist" &     # http://localhost:8099
 node dev/testmiljo/rec3.js vid 'a=/t/miyabi-01?s=quiet&d=2600&now=2026-11-16T14:20@8'
-cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs && node test-v11-levels.mjs && node test-v12-insights.mjs && node test-v13-profile.mjs && node test-v14-account.mjs
+cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs && node test-v11-levels.mjs && node test-v12-insights.mjs && node test-v13-profile.mjs && node test-v14-account.mjs && node test-v15-birthday.mjs
+# md5(prosrc) efter en kedja: node md5-now.mjs v15_fodelsedag merchant_redeem_by_code,birthday_status
 ```
 
 ## Butikspanelen (tappass.se/m, Lovable) — `panel/`
@@ -35,7 +36,7 @@ och Playwright svarar på alla RPC-anrop (`mock.cjs`) — ingen trafik når prod
 - `extract-lovable.py` — plockar ut `m.tsx`, `i18n.tsx`, `styles.css` och `merchant-supabase.ts`
   ur en Lovable-diff mot git:s tomma träd (svaret från `get_diff` sparas som fil eftersom det är stort).
 - `shim/router.js` — ersätter TanStack Router (`Route.component` = sidan).
-- `check.cjs` — funktionstest av "Lugna timmar" och "Senast inlösta" (54 kontroller: spara, validering, polling med
+- `check.cjs` — funktionstest av hela panelutkastet (197 kontroller: lugna timmar, senast inlösta, belöningar och värden, stamgäster, insikter, vinn tillbaka, månadsrapport, profil, födelsedagspresent; engelska och 360 px).
   falsk klocka, bad_session, läsfel, engelska, 360 px). `rec-panel.cjs` — video (768×1024 @2x).
 
 ```bash
