@@ -197,9 +197,9 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await rec.getByText("Kund #a41f").waitFor();
     const rows = await rec.locator("li").allInnerTexts();
     eq(rows.length, 3, "tre inlösta");
-    ok(/Kund #a41f\s+Stämpeln\s+\d\d:\d\d$/.test(rows[0]), "stämpeln + klockslag: " + rows[0]);
-    ok(/Kund #7c02\s+Kod\s+\d\d:\d\d$/.test(rows[1]), "koden + klockslag: " + rows[1]);
-    ok(/Kund #e9b4\s+Stämpeln\s+igår 21:10$/.test(rows[2]), "igår 21:10: " + rows[2]);
+    ok(/Kund #a41f · Valfri kaka\s+Stämpeln\s+\d\d:\d\d$/.test(rows[0]), "stämpeln + klockslag: " + rows[0]);
+    ok(/Kund #7c02 · Gratis kaffe\s+Kod\s+\d\d:\d\d$/.test(rows[1]), "koden + klockslag: " + rows[1]);
+    ok(/Kund #e9b4 · Valfri kaka\s+Stämpeln\s+igår 21:10$/.test(rows[2]), "igår 21:10: " + rows[2]);
     ok(await page.getByText("Oftast löser kunden in genom att hålla telefonen mot er TapPass-stämpel.", { exact: false }).isVisible(), "ny hjälptext vid koden");
     eq(errors, [], "inga sidfel (senast inlösta)");
     await ctx.close();
@@ -231,6 +231,64 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     ok(sw <= 360, "ingen sidledsskroll med långt namn (" + sw + ")");
     const time = await rec.locator("li").first().locator("span").last().boundingBox();
     ok(time && time.x + time.width <= 360, "klockslaget syns helt");
+    await ctx.close();
+  }
+
+  // 10. Belöningar (v10): huvudbelöning, mindre belöningar, validering, belöning i listorna, "Lämna ut"
+  {
+    const { ctx, page, state, errors } = await open(browser);
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Belöningar", exact: true }) });
+    await sec.getByText("En kaffe på huset").waitFor();
+    ok(await sec.getByText("Huvudbelöning · 10 stämplar").isVisible(), "huvudbelöningen visas");
+    ok(await sec.getByText("Valfri kaka 12 · Gratis kaffe 4", { exact: false }).isVisible(), "inlösta per belöning");
+    const selects = sec.locator("select"), inputs = sec.locator("input");
+    eq(await selects.count(), 1, "en mindre belöning");
+    eq([await selects.nth(0).inputValue(), await inputs.nth(0).inputValue()], ["5", "Valfri kaka"], "befintlig belöning");
+    eq((await selects.nth(0).locator("option").allInnerTexts()).slice(0, 2), ["1 stämpel", "2 stämplar"], "1 stämpel / 2 stämplar");
+    eq(await selects.nth(0).locator("option").count(), 9, "1–9 stämplar (under 10)");
+    const add = sec.getByRole("button", { name: "+ Lägg till belöning" });
+    await add.click();
+    eq(await selects.nth(1).inputValue(), "1", "ny rad: minsta lediga (5 upptaget)");
+    const save = sec.getByRole("button", { name: "Spara belöningar" });
+    const calls = () => state.calls.filter((c) => c.fn === "merchant_set_reward_tiers").length;
+    await save.click();
+    await sec.getByText("Varje belöning behöver en text och ett eget antal stämplar, färre än huvudbelöningen.").waitFor();
+    eq(calls(), 0, "tom text: inget anrop");
+    await inputs.nth(1).fill("Kanelbulle");
+    await selects.nth(1).selectOption("5");
+    await save.click();
+    await sec.getByText("Varje belöning behöver en text").waitFor();
+    eq(calls(), 0, "dubblett: inget anrop");
+    await selects.nth(1).selectOption("3");
+    ok(await sec.getByText("Osparade ändringar").isVisible(), "osparade ändringar");
+    await save.click();
+    await sec.getByText("Sparat").waitFor();
+    eq(state.calls.filter((c) => c.fn === "merchant_set_reward_tiers").at(-1).body.p_tiers, [{ at: 5, text: "Valfri kaka" }, { at: 3, text: "Kanelbulle" }], "skickar belöningarna");
+    eq(await inputs.nth(0).inputValue(), "Kanelbulle", "sorterad efter sparning (3 först)");
+    await add.click();
+    ok(await add.isDisabled(), "högst 3");
+    ok(await sec.getByText("Högst 3 mindre belöningar.").isVisible(), "tips om max 3");
+    // Väntande och senast inlösta visar belöningen; "Lämna ut" efter inlösen med kod
+    ok(await page.getByText("Kund #A41F · Valfri kaka", { exact: true }).isVisible(), "väntande: belöning");
+    ok(await page.getByText("Kund #a41f · Valfri kaka", { exact: true }).isVisible(), "senast inlösta: belöning");
+    await page.locator("input[autocomplete=one-time-code]").fill("482913");
+    await page.getByRole("button", { name: "Bekräfta inlösen" }).click();
+    await page.getByText("Lämna ut: Valfri kaka").waitFor();
+    ok(true, "Lämna ut: Valfri kaka");
+    eq(errors, [], "inga sidfel (belöningar)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failTiers: true });
+    await page.getByText("Kunde inte hämta belöningarna just nu.").waitFor();
+    ok(await page.getByText("Lugna timmar", { exact: true }).isVisible(), "resten av panelen fungerar utan v10");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800 });
+    await page.getByText("En kaffe på huset").waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "belöningar: ingen sidledsskroll vid 360 px (" + sw + ")");
     await ctx.close();
   }
 
