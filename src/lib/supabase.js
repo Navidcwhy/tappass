@@ -76,8 +76,14 @@ export async function getCurrentSavedCode(cafeSlug) {
     const device_id = await getDeviceId();
     const { data, error } = await supabase.rpc("current_saved_code", { p_device_id: device_id, p_cafe_slug: cafeSlug });
     if (error || !data || data.ok !== true) return { ok: false };
-    // tierAt (v10): vilken belöning som är sparad (null före v10 = hela kortet)
-    return { ok: true, code: data.code || null, tierAt: data.tier_at == null ? null : Number(data.tier_at) };
+    // tierAt (v10): vilken belöning som är sparad (null före v10 = hela kortet);
+    // reward: dess namn när den sparades (samma som personalen ser)
+    return {
+      ok: true,
+      code: data.code || null,
+      tierAt: data.tier_at == null ? null : Number(data.tier_at),
+      reward: data.code && data.reward ? String(data.reward) : null,
+    };
   } catch {
     return { ok: false };
   }

@@ -2,7 +2,15 @@
 // belöningar under huvudbelöningen, t.ex. "Valfri kaka" vid 5 när kortet är fullt
 // vid 10. Kunden väljer själv: lös in en mindre belöning — då börjar kortet om på
 // stämplarna utöver den — eller samla vidare. Servern avgör (save_reward med vald nivå).
-//   tiers = [{ at, text }] — at < needed, sorterade (minst först)
+//   tiers = [{ at, text, value? }] — at < needed, sorterade (minst först);
+//   value = belöningens värde i kronor om butiken angett det
+
+// Värde i kronor från servern: heltal 1–10 000, annars null (okänt).
+export function krValue(v) {
+  if (v == null || v === "" || typeof v === "boolean") return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : null;
+}
 
 // Butikens nivåer från servern (cafes.reward_tiers), kontrollerade mot kortets längd.
 export function cleanTiers(raw, needed) {
@@ -10,7 +18,10 @@ export function cleanTiers(raw, needed) {
   const n = Number(needed) || 0;
   const seen = new Set();
   return raw
-    .map((t) => ({ at: Number(t && t.at), text: String((t && t.text) || "").trim() }))
+    .map((t) => {
+      const value = krValue(t && t.value_kr);
+      return { at: Number(t && t.at), text: String((t && t.text) || "").trim(), ...(value != null ? { value } : {}) };
+    })
     .filter((t) => {
       if (!Number.isInteger(t.at) || t.at < 1 || t.at >= n || !t.text || seen.has(t.at)) return false;
       seen.add(t.at);
@@ -20,14 +31,15 @@ export function cleanTiers(raw, needed) {
 }
 
 // Alla belöningar på kortet, minst först: de mindre och sist huvudbelöningen.
-//   { at, text, title, full } — title är den längre texten för rubriker
+//   { at, text, title, full, value } — title är den längre texten för rubriker,
+//   value värdet i kronor (null = butiken har inte angett något)
 export function rewardOptions(card) {
   const c = card || {};
   const needed = Math.max(1, c.needed || 1);
   const tiers = (c.tiers || []).filter((t) => t.at < needed);
   return [
-    ...tiers.map((t) => ({ at: t.at, text: t.text, title: t.text, full: false })),
-    { at: needed, text: c.rewardShort || c.reward || "Belöning", title: c.reward || c.rewardShort || "Belöning", full: true },
+    ...tiers.map((t) => ({ at: t.at, text: t.text, title: t.text, full: false, value: t.value ?? null })),
+    { at: needed, text: c.rewardShort || c.reward || "Belöning", title: c.reward || c.rewardShort || "Belöning", full: true, value: c.rewardValue ?? null },
   ];
 }
 

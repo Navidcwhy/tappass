@@ -7,6 +7,7 @@ import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { saveReward, getCurrentSavedCode, redeemByTap, cancelSavedReward } from "../lib/supabase";
 import { rewardOptions, optionFor, bestReached } from "../lib/tiers";
+import { formatKr } from "../lib/savings";
 import { IS_IOS, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "../lib/nfc";
 import useReduceMotion from "../lib/useReduceMotion";
 import Shape from "./Shape";
@@ -79,6 +80,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
   const [tapState, setTapState] = useState(IS_IOS ? "idle" : "waiting"); // waiting | scanning | reading | idle
   const [tapError, setTapError] = useState(null);
   const [tierAt, setTierAt] = useState(null);    // v10: vald belöning (null = hela kortet)
+  const [savedName, setSavedName] = useState(null); // v10: den sparade belöningens namn enligt servern
   const [before, setBefore] = useState(0);       // stämplar på kortet när belöningen löstes in
   const tierRef = useRef(null);
   tierRef.current = tierAt;
@@ -118,6 +120,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
     setSaving(false);
     if (result.ok && result.code) {
       setCode(result.code);
+      setSavedName(result.reward ? String(result.reward) : null);
       if (hasTiers) setTierAt(result.tier_at != null ? Number(result.tier_at) : want);
       setTapError(null);
       setTapState(IS_IOS ? "idle" : "waiting");
@@ -156,12 +159,15 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
     const fallback = (bestReached(start) || {}).at;
     const suggested = reachable(preferRef.current) ? preferRef.current : fallback;
     setTierAt(start && (start.tiers || []).length ? (suggested ?? null) : null);
+    setSavedName(null);
     (async () => {
       const r = await getCurrentSavedCode(slug);
       if (!alive) return;
       if (r.ok && r.code) {
         setCode(r.code);
-        if (r.tierAt != null && (start?.tiers || []).length) setTierAt(r.tierAt);
+        setSavedName(r.reward || null);
+        // Sparad mindre belöning: visa den även om butiken sedan tagit bort nivån
+        if (r.tierAt != null && ((start?.tiers || []).length || r.tierAt < (start?.needed || 0))) setTierAt(r.tierAt);
         setStage("tap");
       } else {
         setStage("locked");
@@ -302,9 +308,15 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
       setTapError({ kind: "network" });
     }
   };
+  const needed = Math.max(1, c.needed || 1);
   const opt = optionFor(c, tierAt);
-  const shown = tierAt != null ? { ...c, reward: opt.title } : c;   // rubriken = vald belöning
-  const canCancel = tierAt != null && !opt.full;
+  const smaller = tierAt != null && tierAt < needed;
+  // Rubriken = vald belöning. En sparad mindre belöning heter som när den sparades
+  // (samma som personalen ser), även om butiken ändrat sina belöningar sedan dess.
+  const shown = tierAt != null ? { ...c, reward: smaller && savedName ? savedName : opt.title } : c;
+  const canCancel = smaller;
+  // Värdet som visas på bekräftelsen ("Sparat 39 kr") — bara om nivån finns kvar hos butiken.
+  const value = opt.at === (tierAt ?? needed) ? opt.value : null;
 
   const t = toneFor(c.ink);
   return (
@@ -316,7 +328,7 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
       ) : stage === "revealed" || stage === "dissolve" ? (
         <CodeScreen card={shown} tone={t} code={code} offline={offline} dissolving={stage === "dissolve"} onUseStamp={backToStamp} onClose={close} />
       ) : (
-        <RedeemedScreen card={c} tone={t} carry={carry} before={before} via={via} at={redeemedAt} onClose={close} />
+        <RedeemedScreen card={c} tone={t} carry={carry} before={before} via={via} at={redeemedAt} value={value} onClose={close} />
       )}
     </Modal>
   );
@@ -683,7 +695,7 @@ function Digit({ ch, delay, dissolving, size, box, color, splash }) {
 }
 
 /* ────────────── 3. INLÖST ────────────── */
-function RedeemedScreen({ card, tone: t, carry = 0, before = null, via = "code", at = null, onClose }) {
+function RedeemedScreen({ card, tone: t, carry = 0, before = null, via = "code", at = null, value = null, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const tick = useRef(new Animated.Value(0)).current;
@@ -735,12 +747,21 @@ function RedeemedScreen({ card, tone: t, carry = 0, before = null, via = "code",
             : "Smaklig måltid! Ditt kort hos " + card.name + " börjar om från noll."}
         </Animated.Text>
 
-        {/* Klockslaget för inlösen — personalen ser att skärmen inte är en gammal skärmdump */}
-        <Animated.View style={[{ marginTop: 14, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: T.container }, slide(22)]}>
-          <LiveDot color={t.primary} />
-          <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: T.ink }}>
-            {(via === "tap" ? "Inlöst med stämpeln" : "Inlöst med koden") + " kl. " + clock(at || new Date())}
-          </Text>
+        {/* Klockslaget för inlösen — personalen ser att skärmen inte är en gammal skärmdump.
+            Bredvid: belöningens värde om butiken angett det (sparat-räknaren, v10). */}
+        <Animated.View style={[{ marginTop: 14, flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 8 }, slide(22)]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, backgroundColor: T.container }}>
+            <LiveDot color={t.primary} />
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: T.ink }}>
+              {(via === "tap" ? "Inlöst med stämpeln" : "Inlöst med koden") + " kl. " + clock(at || new Date())}
+            </Text>
+          </View>
+          {value != null && (
+            <View accessible accessibilityLabel={"Du sparade " + value + " kronor"} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8, paddingLeft: 10, paddingRight: 14, borderRadius: 20, backgroundColor: T.lime }}>
+              <Icon name="piggy" size={18} color={T.onPrimaryContainer} strokeWidth={2.2} />
+              <Text style={{ fontFamily: FONT.bold, fontSize: 14, color: T.onPrimaryContainer }}>{"Sparat " + formatKr(value)}</Text>
+            </View>
+          )}
         </Animated.View>
 
         <Animated.View style={[{ alignSelf: "stretch", marginTop: 28, padding: 16, borderRadius: 24, backgroundColor: t.container }, slide(28)]}>

@@ -38,7 +38,10 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
   const marks = (c.tiers || []).map((x) => x.at - 1);
   const ready = !pending && !complete ? tierReady(c) : null;      // v10: en mindre belöning kan lösas in
   // Sparad belöning: rubriken är den belöning kunden valde (mindre belöning eller hela kortet).
-  const title = pending ? optionFor(c, c.pendingTier).title : c.reward;
+  // En mindre belöning heter som när den sparades (pendingName) — samma som personalen ser,
+  // även om butiken bytt namn på eller tagit bort nivån efteråt.
+  const smaller = pending && c.pendingTier != null && c.pendingTier < needed;
+  const title = pending ? (smaller && c.pendingName ? c.pendingName : optionFor(c, c.pendingTier).title) : c.reward;
 
   return (
     <View style={{ borderRadius: 28, backgroundColor: t.container, padding: 20, overflow: "hidden" }}>

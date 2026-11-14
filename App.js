@@ -20,8 +20,10 @@ import Confetti from "./src/components/Confetti";
 import useReduceMotion from "./src/lib/useReduceMotion";
 import { seasonFor } from "./src/lib/season";
 import { quietNow, quietParts, quietSummary } from "./src/lib/quiet";
-import { cleanTiers, crossedTier } from "./src/lib/tiers";
+import { cleanTiers, crossedTier, krValue } from "./src/lib/tiers";
+import { savingsFields, keepSavings, walletSavings } from "./src/lib/savings";
 import RewardSheet from "./src/components/RewardSheet";
+import SavingsBanner from "./src/components/SavingsBanner";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
 import StampSheet from "./src/components/StampSheet";
@@ -51,17 +53,21 @@ function normalizeCafe(c) {
     needed: c.stamps_needed,
     quietHours: Array.isArray(c.quiet_hours) ? c.quiet_hours : [],   // v8: lugna timmar
     tiers: cleanTiers(c.reward_tiers, c.stamps_needed),               // v10: mindre belöningar
+    rewardValue: krValue(c.reward_value_kr),                          // v10: huvudbelöningens värde (kr)
   };
 }
 
-function normalizeCard({ cafe, stamps, pending, pending_tier, bonus_expires_at }) {
+function normalizeCard(row) {
+  const { cafe, stamps, pending, pending_tier, pending_reward, bonus_expires_at } = row;
   return {
     ...normalizeCafe(cafe),
     stamps,
     times: [],                // we don't render exact times anymore — saved server-side
     pendingReward: !!pending,
     pendingTier: pending && pending_tier != null ? Number(pending_tier) : null,   // v10: vilken belöning som är sparad
+    pendingName: pending && pending_reward ? String(pending_reward) : null,       // v10: dess namn när den sparades
     bonusExpiresAt: bonus_expires_at || null,   // Dagens hjul: aktiv dubbelstämpel
+    ...savingsFields(row),    // v10: sparat-räknaren (inlösta belöningar och deras värde)
   };
 }
 
@@ -328,7 +334,7 @@ export default function App() {
     if (!firstStampDoneRef.current) { firstStampDoneRef.current = true; markFirstStamp(); }
     // En lyckad stämpel förbrukar alltid en aktiv dubbelstämpel hos butiken.
     const card = normalizeCard({ cafe: result.cafe, stamps: result.stamps, pending: false });
-    setWallet((prev) => ({ ...prev, [card.slug]: card }));
+    setWallet((prev) => ({ ...prev, [card.slug]: keepSavings(card, prev[card.slug]) }));
     if (result.bonus_applied) loadWheel();
 
     const added = result.stamps_added === 2 ? 2 : 1;
@@ -384,6 +390,7 @@ export default function App() {
   if (!ready) return null;
 
   const cards = Object.values(wallet);
+  const savings = walletSavings(cards);   // v10: sparat-räknaren
   const pendingCards = cards.filter((c) => c.pendingReward);
   // Fullt kort som inte sparats (rutan stängd före "Lös in", misslyckat sparande,
   // appen stängd under firandet). Måste synas — annars
@@ -488,6 +495,9 @@ export default function App() {
               listH={listH}
               season={season}
               quietKey={quietKey}
+              savings={savings}
+              savingsHold={!!(rewardId || celebrationId)}
+              synced={synced}
             />
           ) : tab === "wheel" ? (
             <DailyWheel
@@ -568,7 +578,7 @@ function SeasonChip({ season }) {
   );
 }
 
-function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey }) {
+function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, onOpenReward, onFindPlaces, onSimulate, cafes, scrollY, listH, season, quietKey, savings, savingsHold, synced }) {
   const all = [...readyCards, ...pendingCards, ...progressCards];
   const rewardCount = readyCards.length + pendingCards.length;
   const f = rewardCount > 0 ? filter : "all";
@@ -580,6 +590,8 @@ function HomeTab({ readyCards, pendingCards, progressCards, filter, setFilter, o
 
   return (
     <View>
+      {/* Sparat-räknaren (v10). Ligger i hemflikens topp: kortbunten mäter sitt läge själv. */}
+      {savings && <SavingsBanner savings={savings} hold={savingsHold} synced={synced} />}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         <Chip label={"Alla · " + all.length} selected={f === "all"} onPress={() => setFilter("all")} />
         {rewardCount > 0 && <Chip label={"Klar att hämta · " + rewardCount} selected={f === "ready"} onPress={() => setFilter("ready")} />}
