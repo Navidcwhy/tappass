@@ -54,6 +54,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const run = async (a) => {
       try {
         if (a.kind === "click") await p.getByText(a.args.join(":"), { exact: true }).first().click({ timeout: 3000 });
+        if (a.kind === "clicklast") await p.getByText(a.args.join(":"), { exact: true }).last().click({ timeout: 3000 });
+        if (a.kind === "eval") { const r = await p.evaluate(a.args.join(":")); if (r === false) errors.push(c.name + " eval gav false: " + a.args.join(":")); }
         if (a.kind === "scroll") {
           await p.evaluate(({ dy, ms }) => new Promise((done) => {
             const el = [...document.querySelectorAll("div")].filter((d) => /(auto|scroll)/.test(getComputedStyle(d).overflowY) && d.scrollHeight > d.clientHeight + 4)

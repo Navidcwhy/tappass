@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { mount, unmountAll, text, until, flush, tick } from "./helpers";
 
 jest.setTimeout(60000);
-jest.mock("../src/lib/supabase", () => ({ saveReward: jest.fn(), getCurrentSavedCode: jest.fn() }));
+jest.mock("../src/lib/supabase", () => ({ saveReward: jest.fn(), getCurrentSavedCode: jest.fn(), redeemByTap: jest.fn() }));
 const sb = require("../src/lib/supabase");
 const RewardSheet = require("../src/components/RewardSheet").default;
 const LoyaltyCard = require("../src/components/LoyaltyCard").default;
@@ -49,7 +49,7 @@ test("låst ark: 'Kortet börjar om på 1/6' när en stämpel följer med", asyn
   sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: null });
   const tree = await mount(<RewardSheet visible card={{ ...card, stamps: 7, pendingReward: false }} onClose={() => {}} onRedeemed={() => {}} />);
   await until(() => text(tree).includes("Kortet börjar om på"), "låst ark");
-  expect(text(tree)).toContain("Kortet börjar om på 1/6 när koden är inlöst");
+  expect(text(tree)).toContain("Kortet börjar om på 1/6 när belöningen är inlöst");
 });
 
 test("utgången dubbelstämpel visas inte som aktiv", async () => {

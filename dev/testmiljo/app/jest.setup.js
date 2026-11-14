@@ -11,3 +11,14 @@ jest.mock("react-native-svg", () => {
 });
 jest.mock("lucide-react-native", () => new Proxy({}, { get: (_, k) => (k === "__esModule" ? false : () => null) }));
 jest.mock("@react-native-async-storage/async-storage", () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
+// NFC-modulen kräver den inbyggda modulen (finns inte i Jest, särskilt inte med iOS-förinställningen).
+jest.mock("react-native-nfc-manager", () => ({
+  __esModule: true,
+  default: {
+    start: jest.fn(() => Promise.resolve()), isSupported: jest.fn(() => Promise.resolve(true)), isEnabled: jest.fn(() => Promise.resolve(true)),
+    requestTechnology: jest.fn(() => new Promise(() => {})), getTag: jest.fn(() => Promise.resolve(null)),
+    cancelTechnologyRequest: jest.fn(() => Promise.resolve()), setAlertMessageIOS: jest.fn(() => Promise.resolve()),
+  },
+  NfcTech: { Ndef: "Ndef" },
+  Ndef: { TNF_WELL_KNOWN: 1, RTD_TEXT: "T", RTD_URI: "U", isType: () => false, text: { decodePayload: () => "" }, uri: { decodePayload: () => "" } },
+}));

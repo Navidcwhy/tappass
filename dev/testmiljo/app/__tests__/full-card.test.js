@@ -2,10 +2,10 @@
 import React from "react";
 import { Animated } from "react-native";
 import { act } from "react-test-renderer";
-import { mount, unmountAll, text, until, tick, flush } from "./helpers";
+import { mount, unmountAll, text, until, tick, flush, press } from "./helpers";
 
 jest.setTimeout(60000);
-jest.mock("../src/lib/supabase", () => ({ saveReward: jest.fn(), getCurrentSavedCode: jest.fn() }));
+jest.mock("../src/lib/supabase", () => ({ saveReward: jest.fn(), getCurrentSavedCode: jest.fn(), redeemByTap: jest.fn() }));
 const Haptics = require("expo-haptics");
 const sb = require("../src/lib/supabase");
 const RewardSheet = require("../src/components/RewardSheet").default;
@@ -25,10 +25,16 @@ afterEach(async () => { await unmountAll(); jest.clearAllTimers(); jest.useRealT
 const layout = (node, l) => act(async () => { node.props.onLayout({ nativeEvent: { layout: { x: 0, width: 358, ...l } } }); });
 const pieces = (tree) => tree.root.findAll((n) => n.type === "View" && n.props.style && Array.isArray(n.props.style.transform) && n.props.style.transform.some((t) => t.scaleX !== undefined)).length;
 
-test("inlösen: koden löses upp först, sedan Inlöst! med fullt kort som börjar om", async () => {
-  sb.getCurrentSavedCode.mockResolvedValueOnce({ ok: true, code: "305174" }).mockResolvedValue({ ok: true, code: null });
+test("inlösen med koden: koden löses upp först, sedan Inlöst! med fullt kort som börjar om", async () => {
+  sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: "305174" });
   const tree = await mount(<RewardSheet visible card={{ ...card, stamps: 7, pendingReward: true }} onClose={() => {}} onRedeemed={() => {}} />);
-  await until(() => sb.getCurrentSavedCode.mock.calls.length >= 2, "pollning");
+  await until(() => text(tree).includes("Visa sifferkod i stället"), "stämpelskärmen");
+  await press(tree, "Visa sifferkod i stället");
+  await until(() => text(tree).includes("DIN KOD"), "koden");
+  sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: null });   // personalen skriver in koden
+  const before = sb.getCurrentSavedCode.mock.calls.length;
+  await tick(2000);
+  await until(() => sb.getCurrentSavedCode.mock.calls.length > before, "pollning");
   await flush();
   // Upplösningen: koden syns fortfarande, bekräftelsen har inte kommit än
   expect(text(tree)).toContain("DIN KOD");
@@ -46,10 +52,12 @@ test("inlösen: koden löses upp först, sedan Inlöst! med fullt kort som börj
 test("koden visas siffra för siffra med hela koden som skärmläsartext", async () => {
   sb.getCurrentSavedCode.mockResolvedValue({ ok: true, code: "305174" });
   const tree = await mount(<RewardSheet visible card={{ ...card, stamps: 6, pendingReward: true }} onClose={() => {}} onRedeemed={() => {}} />);
+  await until(() => text(tree).includes("Visa sifferkod i stället"), "stämpelskärmen");
+  await press(tree, "Visa sifferkod i stället");
   await until(() => text(tree).includes("DIN KOD"), "kod");
-  expect(tree.root.findAll((n) => n.props.accessibilityLabel === "Kod 4 8 2 9 1 7").length).toBeGreaterThan(0);
+  expect(tree.root.findAll((n) => n.props.accessibilityLabel === "Kod 3 0 5 1 7 4").length).toBeGreaterThan(0);
   const t = text(tree);
-  ["4", "8", "2", "9", "1", "7"].forEach((d) => expect(t).toContain(d));
+  ["3", "0", "5", "1", "7", "4"].forEach((d) => expect(t).toContain(d));
 });
 
 test("firandet: konfettikanoner direkt, kast ur stämpeln när den har mätts", async () => {

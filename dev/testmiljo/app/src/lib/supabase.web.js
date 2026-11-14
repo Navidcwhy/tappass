@@ -27,9 +27,25 @@ export async function tapToken() {
   if (S === "quiet") return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 2, bonus_applied: false, quiet_applied: true, carry_over: 0 };
   return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 2, bonus_applied: true, carry_over: 0 };
 }
-export const saveReward = async () => ({ ok: true, code: "305174" });
+// ?s=tap: fullt kort (7/6) som löses in med butikens stämpel (v9). Fel stämpel = Bryggan.
+let savedCode = null;
+let redeemedByTap = false;
+export const saveReward = async () => { await delay(S === "tap" ? 350 : 0); savedCode = "305174"; return { ok: true, code: "305174" }; };
 let codeCalls = 0;
-export const getCurrentSavedCode = async () => { codeCalls++; return S === "redeem" && codeCalls > 2 ? { ok: true, code: null } : { ok: true, code: "305174" }; };
+export const getCurrentSavedCode = async () => {
+  codeCalls++;
+  if (S === "tap") return { ok: true, code: redeemedByTap ? null : savedCode };
+  return S === "redeem" && codeCalls > 2 ? { ok: true, code: null } : { ok: true, code: "305174" };
+};
+export async function redeemByTap(slug, token) {
+  await delay(500);
+  const t = String(token || "").toLowerCase();
+  if (t.startsWith("bryggan")) return { ok: false, error: "wrong_tag", expected: "Miyabi", got: "Bryggans Bageri" };
+  if (!t.startsWith("miyabi")) return { ok: false, error: "unknown_tag", expected: "Miyabi" };
+  redeemedByTap = true;
+  savedCode = null;
+  return { ok: true, carry_over: 1, stamps: 1 };
+}
 export async function loadWallet() {
   await delay(50);
   if (S === "first") return [];
@@ -44,7 +60,8 @@ export async function loadWallet() {
   ];
   const miyabiStamps = S === "plus2" || S === "full" || S === "plus1" || S === "quiet" ? 3 : S === "last" ? 4 : 5;
   const rows = [
-    S === "redeem" ? { cafe: MIYABI, stamps: 7, pending: true, bonus_expires_at: null }
+    S === "tap" ? { cafe: MIYABI, stamps: redeemedByTap ? 1 : 7, pending: !!savedCode && !redeemedByTap, bonus_expires_at: null }
+      : S === "redeem" ? { cafe: MIYABI, stamps: 7, pending: true, bonus_expires_at: null }
       : { cafe: MIYABI, stamps: miyabiStamps, pending: false, bonus_expires_at: S === "home" || S === "blocked" || S === "plus2" || claimed ? midnight(3) : null },
     { cafe: BRYGGAN, stamps: 2, pending: false, bonus_expires_at: null },
   ];
