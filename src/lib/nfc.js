@@ -20,6 +20,8 @@ export async function isNfcEnabled() {
 
 // On iOS every requestTechnology call presents the system "Ready to Scan"
 // sheet; alertMessage is the instruction text shown on it (ignored on Android).
+// Ger taggens innehåll med gemener: texten, eller hela adressen för en URI-record — en
+// dynamisk tagg (v17) har SUN i adressen (?e=…&c=…). Tolkas med splitTag (tagurl.js).
 export async function readToken({ alertMessage } = {}) {
   await NfcManager.requestTechnology(
     NfcTech.Ndef,
@@ -34,7 +36,7 @@ export async function readToken({ alertMessage } = {}) {
     }
     if (r.tnf === Ndef.TNF_WELL_KNOWN && Ndef.isType(r, Ndef.TNF_WELL_KNOWN, Ndef.RTD_URI)) {
       const uri = Ndef.uri.decodePayload(new Uint8Array(r.payload));
-      if (uri) return uri.split("/").pop().trim().toLowerCase();
+      if (uri) return uri.trim().toLowerCase();
     }
   }
   for (const r of records) {

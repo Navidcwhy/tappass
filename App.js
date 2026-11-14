@@ -10,6 +10,7 @@ import { T, FONT, FONT_FILES, tone as toneFor } from "./src/lib/theme";
 import { Icon } from "./src/lib/icons";
 import { useNfcStatus } from "./src/lib/useNfcStatus";
 import { initNfc, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "./src/lib/nfc";
+import { splitTag, sunFromQuery } from "./src/lib/tagurl";
 import { tapToken, saveReward, loadWallet, loadCafes, wheelStatus, getAuthMethods, accountStatus, newDeviceId, birthdayStatus, inviteStatus, ackInvites } from "./src/lib/supabase";
 import { hasOnboarded, markOnboarded, getWheelCity, hasFirstStamp, markFirstStamp, getAccount, setAccount, clearAccount, accountHintDismissed, dismissAccountHint, inviteHintDismissed, dismissInviteHint } from "./src/lib/prefs";
 import { readCache, writeCache } from "./src/lib/cache";
@@ -100,10 +101,11 @@ function walletFromRows(rows) {
 // AsyncStorage). Network is never part of it.
 const LOCAL_BOOT_CAP_MS = 2000;
 
-// https://tappass.se/t/<token>, tappass:///t/<token> och tappass://t/<token>.
+// https://tappass.se/t/<token>, tappass:///t/<token> och tappass://t/<token> → { token, sun }.
 // I den sista formen tolkas "t" som värdnamn och sökvägen blir bara token —
-// tappass.se/t/… länkar dit från "Jag har redan appen" på iPhone.
-export function tokenFromUrl(url) {
+// tappass.se/t/… länkar dit från "Jag har redan appen" på iPhone. En dynamisk tagg (v17)
+// lägger till ?e=…&c=… (SUN), som följer med till servern.
+export function tagFromUrl(url) {
   if (!url) return null;
   try {
     const parsed = Linking.parse(url);
@@ -111,9 +113,20 @@ export function tokenFromUrl(url) {
     const scheme = String(parsed.scheme || "").toLowerCase();
     if (parsed.hostname === "t" && scheme !== "http" && scheme !== "https") path = "t/" + path;
     const m = path.match(/^t\/([a-z0-9_-]+)/i);
-    return m ? m[1].toLowerCase() : null;
+    if (!m) return null;
+    const plain = String(url).split("#")[0];
+    const q = plain.indexOf("?");
+    return { token: m[1].toLowerCase(), sun: q < 0 ? null : sunFromQuery(plain.slice(q + 1)) };
   } catch { return null; }
 }
+
+export function tokenFromUrl(url) {
+  const tag = tagFromUrl(url);
+  return tag ? tag.token : null;
+}
+
+// Stämpling från en tagg ({ token, sun }), en länk eller dev-simuleringen ("miyabi-01")
+const asTag = (input) => (input && typeof input === "object" ? input : splitTag(input));
 
 
 export default function App() {
@@ -387,9 +400,12 @@ export default function App() {
 
   const lastFailedTokenRef = useRef(null);
 
-  // Send a tap to backend by token (e.g. "miyabi-01" or "bryggan-01")
-  const sendTap = useCallback(async (token) => {
-    const result = await tapToken(token);
+  // Send a tap to backend by token (e.g. "miyabi-01" or "bryggan-01"), with SUN from a
+  // dynamic tag ({ token, sun }, v17)
+  const sendTap = useCallback(async (input) => {
+    const tag = asTag(input);
+    if (!tag) return;
+    const result = await tapToken(tag.token, tag.sun);
     if (!result.ok) {
       switch (result.error) {
         case "pending_reward": {
@@ -419,10 +435,33 @@ export default function App() {
           showToast({ type: "unknown" }, 3500);
           return;
         }
+        // Dynamisk tagg (v17): läsningen har redan räknats — "Försök igen" efter ett svar som
+        // aldrig kom fram, eller en gammal länk som öppnats igen. Inget att visa; korten
+        // hämtas på nytt så att en stämpel som faktiskt gavs syns.
+        case "replay": {
+          lastFailedTokenRef.current = null;
+          refreshWallet();
+          return;
+        }
+        // Taggen godtar bara dynamiska läsningar men fick en länk utan e/c
+        // (t.ex. "Jag har redan appen" på tappass.se/t/…).
+        case "sdm_required": {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          showToast({
+            type: "info", icon: "nfc", title: "Läs av stämpeln i kassan",
+            subtitle: Platform.OS === "ios" ? "Tryck på Skanna och håll iPhonen mot stämpeln – en länk räcker inte." : "Stämpeln räknas bara när telefonen hålls mot den – en länk räcker inte.",
+          }, 4500);
+          return;
+        }
+        case "sdm_invalid": {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+          showToast({ type: "unknown", title: "Stämpeln kunde inte kontrolleras", subtitle: "Försök igen. Fungerar det inte – säg till personalen." }, 4500);
+          return;
+        }
         default: {
           // "network", "bad_device" or anything unexpected: never blame the tag.
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          lastFailedTokenRef.current = token;
+          lastFailedTokenRef.current = tag;
           showToast({ type: "network", canRetry: true }, 5000);
           return;
         }
@@ -458,7 +497,7 @@ export default function App() {
       // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
       showStamp({ ...card, added, first, quiet: !!result.quiet_applied, levelUp });
     }
-  }, [showToast, showStamp, loadWheel]);
+  }, [showToast, showStamp, loadWheel, refreshWallet]);
 
   // Välkomstbonusen (v16) visas när stämpelarket och firandet är stängda
   useEffect(() => {
@@ -469,31 +508,35 @@ export default function App() {
   }, [stampCard, celebrationId, loadInvite]);
 
   // Ett fysiskt tryck kan nå appen två gånger (NFC-loopen + App Link-intentet,
-  // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras;
+  // eller en tagg som ligger kvar mot telefonen). Samma token inom 5 s ignoreras —
+  // jämfört utan e/c, eftersom en dynamisk tagg (v17) ger ny adress vid varje läsning;
   // servern spärrar dessutom med butikens väntetid. Gäller inte dev-simulering.
   // Inlösen med tapp (v9): medan kodrutan väntar på butikens stämpel ska nästa lästa
-  // stämpel lösa in i stället för att stämpla. RewardSheet registrerar sig här.
+  // stämpel lösa in i stället för att stämpla. RewardSheet registrerar sig här och får
+  // bara token (inlösen kontrollerar inte SUN).
   const redeemRef = useRef(null);
   const registerRedeem = useCallback((handler) => { redeemRef.current = handler; }, []);
   // "Lös in" på ett kort i kortbunten (stabil, så att kortraderna inte ritas om i onödan).
   const openRewardFromCard = useCallback((slug) => { setTab("home"); setRewardAuto(false); setRewardTier(null); setRewardId(slug); }, []);
 
   const lastTagRef = useRef({ token: null, at: 0 });
-  const sendTagTap = useCallback((token) => {
+  const sendTagTap = useCallback((input) => {
+    const tag = asTag(input);
+    if (!tag) return;
     const redeem = redeemRef.current;
-    const key = (redeem ? "r:" : "t:") + String(token).toLowerCase();
+    const key = (redeem ? "r:" : "t:") + tag.token;
     const now = Date.now();
     if (lastTagRef.current.token === key && now - lastTagRef.current.at < (redeem ? 2000 : 5000)) return;
     lastTagRef.current = { token: key, at: now };
-    if (redeem) return redeem(token);
-    return sendTap(token);
+    if (redeem) return redeem(tag.token);
+    return sendTap(tag);
   }, [sendTap]);
 
-  // Tag is tapped via NFC deep-link (https://tappass.se/t/<token>) or local simulate
+  // Tag is tapped via NFC deep-link (https://tappass.se/t/<token>[?e=…&c=…]) or local simulate
   const handleUrl = useCallback((url) => {
-    const token = tokenFromUrl(url);
-    if (!token) return;
-    sendTagTap(token);
+    const tag = tagFromUrl(url);
+    if (!tag) return;
+    sendTagTap(tag);
     setTab("home");
   }, [sendTagTap]);
 
@@ -1072,12 +1115,6 @@ function LiveScanner({ nfc, onSendTap }) {
     : <AndroidScanner nfc={nfc} onSendTap={onSendTap} />;
 }
 
-// Token can be either a slug ("miyabi") or a full token ("miyabi-01").
-// Backend handles both, but our DB uses "<slug>-01" format.
-function normalizeToken(token) {
-  return token.includes("-") ? token : token + "-01";
-}
-
 function openNfcSettings() {
   RNLinking.sendIntent("android.settings.NFC_SETTINGS")
     .catch(() => RNLinking.openSettings())
@@ -1101,9 +1138,10 @@ function AndroidScanner({ nfc, onSendTap }) {
       if (cancelled || !mountedRef.current) return;
       setErr("");
       try {
-        const token = await readToken();
+        // Slug ("miyabi") blir "miyabi-01"; en dynamisk tagg ger även SUN (splitTag)
+        const tag = splitTag(await readToken());
         if (cancelled || !mountedRef.current) return;
-        if (token) await onSendTap(normalizeToken(token));
+        if (tag) await onSendTap(tag);
       } catch (e) {
         if (!isCancelOrTimeout(e)) setErr("Läsfel — håll stilla nästa gång.");
       } finally {
@@ -1165,11 +1203,11 @@ function IosScanner({ nfc, onSendTap }) {
     setErr("");
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
-      const token = await readToken({ alertMessage: "Håll toppen av iPhonen mot TapPass-stämpeln" });
-      if (token) {
+      const tag = splitTag(await readToken({ alertMessage: "Håll toppen av iPhonen mot TapPass-stämpeln" }));
+      if (tag) {
         await setIosAlert("Stämpel läst");
         await cancelNfc();
-        await onSendTap(normalizeToken(token));
+        await onSendTap(tag);
       } else {
         await cancelNfc();
         setErr("Ingen TapPass-stämpel hittades. Försök igen.");

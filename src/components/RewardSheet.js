@@ -9,6 +9,7 @@ import { saveReward, getCurrentSavedCode, redeemByTap, cancelSavedReward } from 
 import { rewardOptions, optionFor, bestReached } from "../lib/tiers";
 import { formatKr } from "../lib/savings";
 import { IS_IOS, readToken, cancelNfc, setIosAlert, isCancelOrTimeout } from "../lib/nfc";
+import { splitTag } from "../lib/tagurl";
 import useReduceMotion from "../lib/useReduceMotion";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
@@ -254,11 +255,12 @@ export default function RewardSheet({ visible, card, onClose, onRedeemed, onCanc
     setTapError(null);
     setTapState("scanning");
     try {
-      const token = await readToken({ alertMessage: "Håll iPhonen mot " + genitive(c.name) + " stämpel" });
-      if (token) {
+      // Bara token — en dynamisk taggs e/c behövs inte för inlösen
+      const tag = splitTag(await readToken({ alertMessage: "Håll iPhonen mot " + genitive(c.name) + " stämpel" }));
+      if (tag) {
         await setIosAlert("Stämpel läst");
         await cancelNfc();
-        await onTagRef.current(token);
+        await onTagRef.current(tag.token);
       } else {
         await cancelNfc();
         setTapState("idle");
