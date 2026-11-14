@@ -258,7 +258,7 @@ export async function linkAccount() {
     if (error || !data || typeof data !== "object") return { ok: false, error: error && error.code === "PGRST202" ? "disabled" : "network" };
     if (!data.ok) return data;
     if (data.device_id && data.device_id !== device_id) await setDeviceId(String(data.device_id));
-    await endAuthSession();
+    endAuthSession();   // väntar inte: ett segt nät får inte hålla kvar "Loggar in…"
     return data;
   } catch {
     return { ok: false, error: "network" };
@@ -272,7 +272,7 @@ export async function rotateAccountKey() {
     if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
     if (!data.ok) return data;
     await setDeviceId(String(data.device_id));
-    await endAuthSession();
+    endAuthSession();
     return data;
   } catch {
     return { ok: false, error: "network" };
@@ -285,8 +285,8 @@ export async function deleteAccount() {
     const { data, error } = await auth().rpc("account_delete");
     if (error || !data || typeof data !== "object") return { ok: false, error: "network" };
     if (!data.ok) return data;
-    await endAuthSession();
     await newDeviceId();
+    endAuthSession();
     return data;
   } catch {
     return { ok: false, error: "network" };

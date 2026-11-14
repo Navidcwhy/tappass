@@ -51,7 +51,7 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
   const [now, setNow] = useState(Date.now());
   const [verified, setVerified] = useState(false);   // koden godkänd; ett nätfel efteråt försöks igen utan ny kod
   const [result, setResult] = useState(null);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -269,7 +269,8 @@ export default function AccountSheet({ visible, account, onChanged, onClose }) {
 
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={busy ? () => {} : close}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }}>
+      {/* "padding" även på Android: ett genomskinligt Modal-fönster ändrar inte alltid storlek när tangentbordet kommer */}
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable accessibilityLabel="Stäng" onPress={busy ? undefined : close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: T.scrim }} />
         <Animated.View style={{
           maxHeight: Dimensions.get("window").height * 0.92,
