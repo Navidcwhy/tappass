@@ -3,6 +3,8 @@ import { View, Text, Modal, Pressable, Animated, Easing } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { T, FONT, tone as toneFor } from "../lib/theme";
+import { Icon } from "../lib/icons";
+import { guestName } from "../lib/levels";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 import InkSplash from "./InkSplash";
@@ -22,6 +24,7 @@ const HIT_2 = REDROP_AT + 240;
 //   card.added === 2 → dubbelstämpel: två nedslag, "+1" blir "+2" med limegnistor
 //   card.first       → kundens första stämpel någonsin: välkomsttext + konfetti
 //   card.quiet       → dubbelstämpeln kom från butikens lugna timme (v8)
+//   card.levelUp     → besöket gav en ny stamgästnivå hos stället (v11): märket poppar fram
 // Stängs av App efter några sekunder.
 export default function StampSheet({ card, onClose }) {
   const insets = useSafeAreaInsets();
@@ -32,14 +35,21 @@ export default function StampSheet({ card, onClose }) {
   const shake = useRef(new Animated.Value(0)).current;
   const wave = useRef(new Animated.Value(0)).current;
   const badge = useRef(new Animated.Value(0)).current;
+  const medal = useRef(new Animated.Value(0)).current;   // v11: ny stamgästnivå
   const [hits, setHits] = useState(0);
 
   useEffect(() => {
     if (!card) return;
     const double = card.added === 2;
     const timers = [];
-    [rise, drop, drop2, squash, shake, wave, badge].forEach((v) => v.setValue(0));
+    [rise, drop, drop2, squash, shake, wave, badge, medal].forEach((v) => v.setValue(0));
     setHits(0);
+    if (card.levelUp) {
+      // Märket poppar fram när stämpeln (eller den andra stämpeln) har landat
+      const at = (double ? HIT_2 : HIT_1) + 420;
+      Animated.spring(medal, { toValue: 1, friction: 5, tension: 90, delay: at, useNativeDriver: true }).start();
+      timers.push(setTimeout(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success), at));
+    }
 
     const hit = (n) => {
       setHits(n);
@@ -169,6 +179,30 @@ export default function StampSheet({ card, onClose }) {
           <View style={{ marginTop: 18 }}>
             <StampRow total={needed} filled={stamps} tone={t} size={30} pops={pops} glowIndex={left === 1 ? stamps : -1} />
           </View>
+
+          {!!card.levelUp && (
+            <Animated.View
+              accessible
+              accessibilityLiveRegion="polite"
+              accessibilityLabel={"Ny nivå: du är " + guestName(card.levelUp) + " hos " + card.name}
+              style={{
+                marginTop: 18, alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: 12,
+                padding: 12, paddingRight: 16, borderRadius: 20, backgroundColor: card.levelUp.bg,
+                opacity: medal.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }),
+                transform: [{ scale: medal.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }],
+              }}
+            >
+              <Shape kind="burst12" size={44} color={card.levelUp.accent}>
+                <Icon name="award" size={22} color="#FFFFFF" strokeWidth={2.4} />
+              </Shape>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: FONT.bold, fontSize: 11, letterSpacing: 0.88, color: card.levelUp.ink }}>NY NIVÅ</Text>
+                <Text style={{ fontFamily: FONT.title, fontSize: 17, lineHeight: 22, color: card.levelUp.ink }}>
+                  Du är {guestName(card.levelUp)} hos {card.name}
+                </Text>
+              </View>
+            </Animated.View>
+          )}
 
           <Pressable
             onPress={onClose}
