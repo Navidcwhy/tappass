@@ -36,8 +36,7 @@ och Playwright svarar på alla RPC-anrop (`mock.cjs`) — ingen trafik når prod
 - `extract-lovable.py` — plockar ut `m.tsx`, `i18n.tsx`, `styles.css` och `merchant-supabase.ts`
   ur en Lovable-diff mot git:s tomma träd (svaret från `get_diff` sparas som fil eftersom det är stort).
 - `shim/router.js` — ersätter TanStack Router (`Route.component` = sidan).
-- `check.cjs` — funktionstest av hela panelutkastet (197 kontroller: lugna timmar, senast inlösta, belöningar och värden, stamgäster, insikter, vinn tillbaka, månadsrapport, profil, födelsedagspresent; engelska och 360 px).
-  falsk klocka, bad_session, läsfel, engelska, 360 px). `rec-panel.cjs` — video (768×1024 @2x).
+- `check.cjs` — funktionstest av hela panelutkastet (197 kontroller: lugna timmar, senast inlösta, belöningar och värden, stamgäster, insikter, vinn tillbaka, månadsrapport, profil, födelsedagspresent; engelska och 360 px). `rec-panel.cjs` — video (768×1024 @2x).
 
 ```bash
 cd dev/testmiljo/panel && npm ci
