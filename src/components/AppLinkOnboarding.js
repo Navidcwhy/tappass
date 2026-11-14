@@ -58,9 +58,7 @@ const IOS_STEPS = [
 const STEPS = Platform.OS === "ios" ? IOS_STEPS : ANDROID_STEPS;
 const TOTAL = STEPS.length + 1;   // + välkomstsidan
 
-// onAdmin (valfri): taggverktyget för TapPass — öppnas genom att hålla på bilden i tre sekunder
-// (bara Android; bilden är dold för skärmläsare, så ingen extra åtgärd läses upp).
-export default function AppLinkOnboarding({ visible, onClose, onAdmin }) {
+export default function AppLinkOnboarding({ visible, onClose }) {
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState(0);
   const slide = useRef(new Animated.Value(0)).current;
@@ -93,7 +91,7 @@ export default function AppLinkOnboarding({ visible, onClose, onAdmin }) {
       <View style={{ flex: 1, backgroundColor: T.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}>
         <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
           <Animated.View style={{ flex: 1, opacity: slide, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-            {step === 0 ? <Welcome onAdmin={Platform.OS === "android" ? onAdmin : null} /> : <StepPage s={s} index={step} />}
+            {step === 0 ? <Welcome /> : <StepPage s={s} index={step} />}
           </Animated.View>
         </ScrollView>
 
@@ -116,10 +114,10 @@ export default function AppLinkOnboarding({ visible, onClose, onAdmin }) {
   );
 }
 
-function Welcome({ onAdmin }) {
+function Welcome() {
   return (
     <View>
-      <WelcomeArt onLongPress={onAdmin} />
+      <WelcomeArt />
       <View style={{ paddingHorizontal: 24, paddingTop: 8 }}>
         <Text style={{ fontFamily: FONT.title, fontSize: 36, lineHeight: 43, color: T.ink }}>Stämpelkortet som bor i telefonen</Text>
         <Text style={{ marginTop: 10, fontFamily: FONT.regular, fontSize: 16, lineHeight: 24, color: T.inkSoft }}>
@@ -160,7 +158,7 @@ function StepPage({ s, index }) {
 
 // Illustration: telefon som tappas mot TapPass-stämpeln, med stämplar som flyger ut.
 // Ritad i en 390×330-ruta och skalad till skärmbredden.
-function WelcomeArt({ onLongPress }) {
+function WelcomeArt() {
   const s = Math.min(1, W / 390);
   const done = (size, color) => (
     <Shape kind="cookie9" size={size} color={color}>
@@ -172,7 +170,7 @@ function WelcomeArt({ onLongPress }) {
   ));
 
   return (
-    <Pressable onLongPress={onLongPress || undefined} delayLongPress={3000} disabled={!onLongPress} accessible={false} importantForAccessibility="no-hide-descendants" style={{ width: 390 * s, height: 330 * s, alignSelf: "center" }}>
+    <View accessible={false} importantForAccessibility="no-hide-descendants" style={{ width: 390 * s, height: 330 * s, alignSelf: "center" }}>
       <View style={{ position: "absolute", width: 390, height: 330, left: -(390 * (1 - s)) / 2, top: -(330 * (1 - s)) / 2, transform: [{ scale: s }] }}>
         <Shape kind="flower8" size={280} color={T.primaryContainer} style={{ position: "absolute", left: 55, top: 34 }} />
         <Shape kind="sunny8" size={96} color="#D3E8EC" style={{ position: "absolute", left: 278, top: 20 }} />
@@ -208,6 +206,6 @@ function WelcomeArt({ onLongPress }) {
         <View style={{ position: "absolute", left: 300, top: 130 }}>{done(28, "#1B6371")}</View>
         <Shape kind="cookie9" size={22} color={T.primary} style={{ position: "absolute", left: 96, top: 34 }} />
       </View>
-    </Pressable>
+    </View>
   );
 }
