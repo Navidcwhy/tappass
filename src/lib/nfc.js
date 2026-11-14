@@ -52,6 +52,14 @@ export async function cancelNfc() {
   try { await NfcManager.cancelTechnologyRequest(); } catch {}
 }
 
+// Taggverktyget (v17, bara Android): väntar på en ISO-DEP-tagg (NTAG 424 DNA) och ger
+// tx(bytes) → svaret inklusive SW1 SW2. Avsluta med cancelNfc().
+export async function openIsoDep() {
+  await NfcManager.requestTechnology(NfcTech.IsoDep);
+  try { await NfcManager.setTimeout(2000); } catch {}
+  return async (bytes) => Uint8Array.from(await NfcManager.isoDepHandler.transceive(Array.from(bytes)));
+}
+
 // Update the text on the iOS scan sheet before it closes (no-op on Android).
 export async function setIosAlert(message) {
   if (!IS_IOS) return;
