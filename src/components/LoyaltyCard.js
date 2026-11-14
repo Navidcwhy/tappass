@@ -4,6 +4,7 @@ import { T, FONT, tone as toneFor } from "../lib/theme";
 import { Icon } from "../lib/icons";
 import { expiryText, isActiveUntil } from "../lib/wheel";
 import { clockText } from "../lib/quiet";
+import { optionFor, tierReady } from "../lib/tiers";
 import Shape from "./Shape";
 import StampRow from "./StampRow";
 import Shine from "./Shine";
@@ -18,6 +19,8 @@ const stampSize = (n) => Math.max(18, Math.min(28, Math.floor((Dimensions.get("w
 //   pågående     — "2 kvar till …" + stämplar
 //   fullt        — BELÖNING KLAR + "Lös in" (belöningen är inte sparad än)
 //   sparad       — SPARAD BELÖNING + "Lös in" (stämpling pausad tills inlöst)
+//   mindre belöning nådd (v10) — ruta "Valfri kaka klar" + "Lös in"; kunden kan också samla vidare
+// Rutor där en mindre belöning väntar visar ett paket (marks).
 // Kort med belöning får en holografisk glans; shineOffset (Animated-nod) låter
 // glansen följa skrollningen och stillShine stänger av loopen (Reducera rörelse).
 // quiet = butikens lugna timme som gäller just nu ({ from, to }) → "Lugn timme just nu".
@@ -32,6 +35,10 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
   const left = needed - stamps;
   const initial = (c.name || "?").trim().charAt(0).toUpperCase();
   const meta = [c.type, c.area].filter(Boolean).join(" · ");
+  const marks = (c.tiers || []).map((x) => x.at - 1);
+  const ready = !pending && !complete ? tierReady(c) : null;      // v10: en mindre belöning kan lösas in
+  // Sparad belöning: rubriken är den belöning kunden valde (mindre belöning eller hela kortet).
+  const title = pending ? optionFor(c, c.pendingTier).title : c.reward;
 
   return (
     <View style={{ borderRadius: 28, backgroundColor: t.container, padding: 20, overflow: "hidden" }}>
@@ -56,14 +63,14 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
           <Text style={{ fontFamily: FONT.bold, fontSize: 12, letterSpacing: 0.96, color: t.primary, marginTop: 18 }}>
             {pending ? "SPARAD BELÖNING" : "BELÖNING KLAR"}
           </Text>
-          <Text style={{ fontFamily: FONT.title, fontSize: 26, lineHeight: 30, color: t.onContainer, marginTop: 4 }}>{c.reward}</Text>
+          <Text style={{ fontFamily: FONT.title, fontSize: 26, lineHeight: 30, color: t.onContainer, marginTop: 4 }}>{title}</Text>
           {pending ? (
             <Text style={{ fontFamily: FONT.regular, fontSize: 14, lineHeight: 20, color: t.muted, marginTop: 6 }}>
               Nya stämplar hos {c.name} pausas tills du löst in den.
             </Text>
           ) : (
             <View style={{ marginTop: 14 }}>
-              <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} />
+              <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} marks={marks} />
             </View>
           )}
           <Pressable
@@ -91,8 +98,9 @@ export default function LoyaltyCard({ card, onOpenReward, shineOffset, stillShin
           )}
           <View style={{ marginTop: 12 }}>
             {/* Sista rutan lyser när bara en stämpel är kvar */}
-            <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} glowIndex={left === 1 ? stamps : -1} />
+            <StampRow total={needed} filled={stamps} tone={t} size={stampSize(needed)} glowIndex={left === 1 ? stamps : -1} marks={marks} />
           </View>
+          {ready && <TierReady tone={t} tier={ready} onPress={() => onOpenReward(c.id)} />}
         </View>
       )}
 
@@ -128,6 +136,25 @@ function BonusBanner({ expiresAt }) {
         <Text style={{ fontFamily: FONT.bold, fontSize: 15, lineHeight: 20, color: T.onPrimaryContainer }}>Dubbelstämpel aktiv</Text>
         <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: "#2E3A10" }}>Nästa stämpel här ger 2 · {expiryText(expiresAt, Date.now(), { short: true })}</Text>
       </View>
+    </View>
+  );
+}
+
+// En mindre belöning kan lösas in (v10). Kunden kan också samla vidare till en större.
+function TierReady({ tone: t, tier, onPress }) {
+  return (
+    <View accessibilityLabel={tier.text + " klar. Lös in nu eller samla vidare."} style={{ marginTop: 16, paddingVertical: 10, paddingLeft: 10, paddingRight: 10, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.62)", flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <Shape kind="cookie9" size={40} color={t.primary}>
+        <Icon name="gift" size={20} color="#FFFFFF" />
+      </Shape>
+      <View style={{ flex: 1 }}>
+        <Text numberOfLines={1} style={{ fontFamily: FONT.bold, fontSize: 15, lineHeight: 20, color: t.onContainer }}>{tier.text} klar</Text>
+        <Text style={{ fontFamily: FONT.regular, fontSize: 13, lineHeight: 18, color: t.muted }}>Lös in nu eller samla vidare</Text>
+      </View>
+      <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={"Lös in " + tier.text}
+        style={({ pressed }) => ({ height: 40, paddingHorizontal: 16, borderRadius: 20, backgroundColor: t.primary, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.88 : 1 })}>
+        <Text style={{ fontFamily: FONT.semibold, fontSize: 14, color: "#FFFFFF" }}>Lös in</Text>
+      </Pressable>
     </View>
   );
 }

@@ -40,10 +40,12 @@ function Decor({ tone: t }) {
 const CANNON_AT = 450;   // ms efter att firandet öppnats
 
 // Helskärm när en stämpelrad blir full: "Lös in nu" eller "Spara till senare".
+// tier (v10): en mindre belöning nåddes — "Lös in nu" eller "Samla vidare" (kortet
+// fortsätter mot huvudbelöningen och den mindre går att lösa in senare från kortet).
 // Stängs den utan val ligger kortet kvar som "Belöning klar" på hemskärmen.
 // Konfetti med fysik i butikens färger: först ur den fulla stämpeln, sedan två
 // kanoner från skärmens nederhörn.
-export default function CelebrationScreen({ visible, card, carry = 0, busy, onSave, onRedeemNow, onClose }) {
+export default function CelebrationScreen({ visible, card, carry = 0, tier = null, busy, onSave, onRedeemNow, onClose }) {
   const insets = useSafeAreaInsets();
   const pop = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
@@ -62,6 +64,9 @@ export default function CelebrationScreen({ visible, card, carry = 0, busy, onSa
   if (!visible || !card) return null;
   const t = toneFor(card.ink);
   const needed = Math.max(1, card.needed || 1);
+  const stamps = Math.max(0, card.stamps || 0);
+  const mainShort = card.rewardShort || card.reward || "";
+  const lower = (x) => (x ? x.charAt(0).toLowerCase() + x.slice(1) : "");
   const colors = [t.primary, t.deco, T.lime, "#FFFFFF", t.onContainer];
   const burstFrom = mid && badge
     ? [{ x: mid.x + badge.x + badge.width / 2, y: mid.y + badge.y + badge.height / 2, count: 36, angle: -90, spread: 80, speed: [900, 1800], delay: 60 }]
@@ -82,13 +87,15 @@ export default function CelebrationScreen({ visible, card, carry = 0, busy, onSa
             transform: [{ scale: pop }, { rotate: pop.interpolate({ inputRange: [0, 1], outputRange: ["-25deg", "0deg"] }) }],
           }}>
             <Shape kind="burst12" size={260} color={t.primary} style={{ position: "absolute", left: 0, top: 0 }} />
-            <Text style={{ fontFamily: FONT.display, fontSize: 72, lineHeight: 78, color: "#FFFFFF" }}>{needed}/{needed}</Text>
+            <Text style={{ fontFamily: FONT.display, fontSize: 72, lineHeight: 78, color: "#FFFFFF" }}>{tier ? tier.at : needed + "/" + needed}</Text>
             <Text style={{ fontFamily: FONT.medium, fontSize: 15, color: "rgba(255,255,255,0.85)" }}>stämplar</Text>
           </Animated.View>
 
-          <Text style={{ marginTop: 28, fontFamily: FONT.title, fontSize: 40, lineHeight: 48, color: t.onContainer, textAlign: "center" }}>Kortet är fullt!</Text>
+          <Text style={{ marginTop: 28, fontFamily: FONT.title, fontSize: 40, lineHeight: 48, color: t.onContainer, textAlign: "center" }}>{tier ? tier.text + " klar!" : "Kortet är fullt!"}</Text>
           <View style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.6)" }}>
-            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: t.onContainer, textAlign: "center" }}>{card.reward}</Text>
+            <Text style={{ fontFamily: FONT.semibold, fontSize: 16, color: t.onContainer, textAlign: "center" }}>
+              {tier ? "Eller samla vidare: " + Math.max(0, needed - stamps) + " kvar till " + lower(mainShort) : card.reward}
+            </Text>
           </View>
           <Text style={{ marginTop: 8, fontFamily: FONT.regular, fontSize: 15, color: t.muted }}>hos {card.name}</Text>
           {carry > 0 && (
@@ -115,15 +122,17 @@ export default function CelebrationScreen({ visible, card, carry = 0, busy, onSa
           <Pressable
             disabled={busy}
             accessibilityRole="button"
-            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); onSave(); }}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); if (tier) onClose(); else onSave(); }}
             style={({ pressed }) => ({ marginTop: 4, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.7 : 1 })}
           >
             {busy
               ? <ActivityIndicator color={t.onContainer} />
-              : <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: t.onContainer }}>Spara till senare</Text>}
+              : <Text style={{ fontFamily: FONT.semibold, fontSize: 15, color: t.onContainer }}>{tier ? "Samla vidare" : "Spara till senare"}</Text>}
           </Pressable>
           <Text style={{ marginTop: 4, fontFamily: FONT.regular, fontSize: 12, lineHeight: 17, color: t.muted, textAlign: "center" }}>
-            Sparar du belöningen pausas stämpling hos {card.name} tills du löst in den.
+            {tier
+              ? "Löser du in börjar kortet om på " + Math.max(0, stamps - tier.at) + "/" + needed + ". Samlar du vidare kan du lösa in den senare från kortet."
+              : "Sparar du belöningen pausas stämpling hos " + card.name + " tills du löst in den."}
           </Text>
         </Animated.View>
 

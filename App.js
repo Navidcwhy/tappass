@@ -20,6 +20,7 @@ import Confetti from "./src/components/Confetti";
 import useReduceMotion from "./src/lib/useReduceMotion";
 import { seasonFor } from "./src/lib/season";
 import { quietNow, quietParts, quietSummary } from "./src/lib/quiet";
+import { cleanTiers, crossedTier } from "./src/lib/tiers";
 import RewardSheet from "./src/components/RewardSheet";
 import CelebrationScreen from "./src/components/CelebrationScreen";
 import AppLinkOnboarding from "./src/components/AppLinkOnboarding";
@@ -49,15 +50,17 @@ function normalizeCafe(c) {
     rewardShort: c.reward_short,
     needed: c.stamps_needed,
     quietHours: Array.isArray(c.quiet_hours) ? c.quiet_hours : [],   // v8: lugna timmar
+    tiers: cleanTiers(c.reward_tiers, c.stamps_needed),               // v10: mindre belöningar
   };
 }
 
-function normalizeCard({ cafe, stamps, pending, bonus_expires_at }) {
+function normalizeCard({ cafe, stamps, pending, pending_tier, bonus_expires_at }) {
   return {
     ...normalizeCafe(cafe),
     stamps,
     times: [],                // we don't render exact times anymore — saved server-side
     pendingReward: !!pending,
+    pendingTier: pending && pending_tier != null ? Number(pending_tier) : null,   // v10: vilken belöning som är sparad
     bonusExpiresAt: bonus_expires_at || null,   // Dagens hjul: aktiv dubbelstämpel
   };
 }
@@ -114,6 +117,8 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [stampCard, setStampCard] = useState(null);  // "Ny stämpel"-arket
   const [celebrationCarry, setCelebrationCarry] = useState(0);  // överskott som följer med till nästa kort
+  const [celebrationTier, setCelebrationTier] = useState(null);  // v10: en mindre belöning nåddes ({ at, text })
+  const [rewardTier, setRewardTier] = useState(null);            // v10: belöning att föreslå i kodrutan
   const [wheel, setWheel] = useState(null);          // Dagens hjul: serverns läge (null = inte hämtat)
   const [wheelCity, setWheelCityState] = useState(null);   // vald stad (sparas bara på telefonen)
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -326,13 +331,18 @@ export default function App() {
     setWallet((prev) => ({ ...prev, [card.slug]: card }));
     if (result.bonus_applied) loadWheel();
 
-    if (result.complete) {
-      setCelebrationCarry(Number(result.carry_over) || 0);
+    const added = result.stamps_added === 2 ? 2 : 1;
+    const tier = result.complete ? null : crossedTier(card, added);
+    if (result.complete || tier) {
+      // Fullt kort, eller en mindre belöning nåddes (v10): firandet med valet
+      // "Lös in nu" eller (mindre belöning) "Samla vidare".
+      setCelebrationCarry(result.complete ? Number(result.carry_over) || 0 : 0);
+      setCelebrationTier(tier);
       setTimeout(() => setCelebrationId(card.slug), 700);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } else {
       // Vibrationen kommer från arket, i takt med att stämpeln slår ner.
-      showStamp({ ...card, added: result.stamps_added === 2 ? 2 : 1, first, quiet: !!result.quiet_applied });
+      showStamp({ ...card, added, first, quiet: !!result.quiet_applied });
     }
   }, [showToast, showStamp, loadWheel]);
 
@@ -344,7 +354,7 @@ export default function App() {
   const redeemRef = useRef(null);
   const registerRedeem = useCallback((handler) => { redeemRef.current = handler; }, []);
   // "Lös in" på ett kort i kortbunten (stabil, så att kortraderna inte ritas om i onödan).
-  const openRewardFromCard = useCallback((slug) => { setTab("home"); setRewardAuto(false); setRewardId(slug); }, []);
+  const openRewardFromCard = useCallback((slug) => { setTab("home"); setRewardAuto(false); setRewardTier(null); setRewardId(slug); }, []);
 
   const lastTagRef = useRef({ token: null, at: 0 });
   const sendTagTap = useCallback((token) => {
@@ -391,10 +401,12 @@ export default function App() {
   // Kodrutan öppnas alltid över fliken Kort: där körs Androids NFC-loop som läser
   // butikens stämpel vid inlösen med tapp.
   // auto: kunden tryckte "Lös in nu" i firandet — rutan sparar direkt och väntar på stämpeln.
-  const openReward = (slug, auto = false) => { setTab("home"); setRewardAuto(auto); setRewardId(slug); };
+  // tierAt (v10): belöningen kunden valde i firandet (mindre belöning) — annars föreslår rutan den största.
+  const openReward = (slug, auto = false, tierAt = null) => { setTab("home"); setRewardAuto(auto); setRewardTier(tierAt); setRewardId(slug); };
   const onRedeemNow = () => {
-    openReward(celebrationId, true);
+    openReward(celebrationId, true, celebrationTier ? celebrationTier.at : null);
     setCelebrationId(null);
+    setCelebrationTier(null);
   };
   // Inlöst (med butikens stämpel, eller personalen skrev in koden) → hämta nytt kortläge.
   // Kodrutan visar "Inlöst!" och stängs av kunden.
@@ -509,8 +521,8 @@ export default function App() {
         <Snackbar toast={toast} bottom={bottomH + 12} onAction={onSnackAction} />
 
         <StampSheet card={stampCard} onClose={closeStamp} />
-        <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); }} onRedeemed={onRedeemed} registerRedeem={registerRedeem} autoRedeem={rewardAuto} />
-        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => setCelebrationId(null)} />
+        <RewardSheet visible={!!rewardId} card={rewardCard} onClose={() => { setRewardId(null); setRewardAuto(false); setRewardTier(null); }} onRedeemed={onRedeemed} onCancelled={refreshWallet} registerRedeem={registerRedeem} autoRedeem={rewardAuto} preferTier={rewardTier} />
+        <CelebrationScreen visible={!!celebrationCard} card={celebrationCard} carry={celebrationCarry} tier={celebrationTier} busy={loadingAction} onSave={onSaveReward} onRedeemNow={onRedeemNow} onClose={() => { setCelebrationId(null); setCelebrationTier(null); }} />
         <AppLinkOnboarding visible={showOnboarding} onClose={closeOnboarding} />
       </SafeAreaView>
     </SafeAreaProvider>
