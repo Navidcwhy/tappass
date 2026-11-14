@@ -27,6 +27,7 @@ export const T = {
   inverseSurface:   "#30312B",
   inverseOnSurface: "#F2F1E9",
   inversePrimary:   "#B6D97A",
+  error:            "#BA1A1A",   // destruktiva knappar (Radera konto)
   errorContainer:   "#FFDAD6",
   onErrorContainer: "#410002",
   errorText:        "#5C1A14",
