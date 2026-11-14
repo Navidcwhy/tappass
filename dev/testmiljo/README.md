@@ -6,7 +6,7 @@ Används i en **kopia** av repot, aldrig i själva appen (filerna här byggs int
 ## Innehåll
 - `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 106 tester, android + ios (ett bara iOS).
 - `app/jest.*.config.js`, `app/jest.setup.js` — konfiguration och mockar (haptik, svg, ikoner, AsyncStorage).
-- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|stack|win|quiet|home …`,
+- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|stack|win|quiet|home …`,
   `&d=<ms>` innan tappet svarar), NFC och NFC-status för webbförhandsvisningen.
   `window.__tappassTag("miyabi-01")` simulerar att en stämpel hålls mot telefonen (`?s=tap`: Bryggan = fel stämpel).
 - `rec3.js` — spelar in klipp i 780×1688 (390×844 @2x) via Chromes screencast, med klick

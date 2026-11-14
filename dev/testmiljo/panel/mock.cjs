@@ -50,7 +50,9 @@ async function mock(page, opts = {}) {
     // Fler belöningar (v10)
     needed: opts.needed ?? 10,
     tiers: opts.tiers ?? [{ at: 5, text: "Valfri kaka" }],
+    mainValue: opts.mainValue ?? null,           // v10: huvudbelöningens värde i kr
     failTiers: !!opts.failTiers,
+    forceInvalidValue: !!opts.forceInvalidValue, // servern svarar invalid_value (t.ex. en äldre klient)
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -86,15 +88,24 @@ async function mock(page, opts = {}) {
         return json({ ok: true, recent: state.recent });
       case "merchant_get_reward_tiers":
         if (state.failTiers) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "not found" }) });
-        return json({ ok: true, stamps_needed: state.needed, reward_text: "En kaffe på huset", reward_short: "Gratis kaffe", tiers: state.tiers, max_tiers: 3,
+        return json({ ok: true, stamps_needed: state.needed, reward_text: "En kaffe på huset", reward_short: "Gratis kaffe", reward_value_kr: state.mainValue, tiers: state.tiers, max_tiers: 3,
           redeemed_30d: [{ tier_at: 5, reward: "Valfri kaka", count: 12 }, { tier_at: 10, reward: "Gratis kaffe", count: 4 }] });
       case "merchant_set_reward_tiers": {
+        // Som servern efter v10: tre argument, alltid alla (annars hittar PostgREST ingen funktion)
+        if (!("p_reward_value_kr" in body) || !("p_tiers" in body)) {
+          return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "Could not find the function public.merchant_set_reward_tiers(p_tiers, p_token)" }) });
+        }
+        const kr = (v) => v === null || (Number.isInteger(v) && v >= 1 && v <= 10000);
+        const mv = body.p_reward_value_kr;
+        if (state.forceInvalidValue || !kr(mv)) return json({ ok: false, error: "invalid_value" }, 300);
         const t = body.p_tiers;
-        const okList = Array.isArray(t) && t.length <= 3 && t.every((x) => Number.isInteger(x.at) && x.at >= 1 && x.at < state.needed && String(x.text || "").trim().length >= 1 && String(x.text).trim().length <= 40)
+        const okList = Array.isArray(t) && t.length <= 3 && t.every((x) => Number.isInteger(x.at) && x.at >= 1 && x.at < state.needed && String(x.text || "").trim().length >= 1 && String(x.text).trim().length <= 40
+            && (x.value_kr === undefined || kr(x.value_kr)))
           && new Set(t.map((x) => x.at)).size === t.length;
         if (!okList) return json({ ok: false, error: "invalid_tiers", max_tiers: 3, stamps_needed: state.needed }, 300);
-        state.tiers = t.map((x) => ({ at: x.at, text: String(x.text).trim() })).sort((a, b) => a.at - b.at);
-        return json({ ok: true, tiers: state.tiers, stamps_needed: state.needed }, 400);
+        state.tiers = t.map((x) => ({ at: x.at, text: String(x.text).trim(), ...(x.value_kr != null ? { value_kr: x.value_kr } : {}) })).sort((a, b) => a.at - b.at);
+        state.mainValue = mv;
+        return json({ ok: true, tiers: state.tiers, stamps_needed: state.needed, reward_value_kr: mv }, 400);
       }
       case "merchant_redeem_by_code":
         return json({ ok: true, code: body.p_code, carry_over: 0, tier_at: 5, reward: "Valfri kaka" }, 300);

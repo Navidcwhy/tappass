@@ -241,7 +241,8 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await sec.getByText("En kaffe på huset").waitFor();
     ok(await sec.getByText("Huvudbelöning · 10 stämplar").isVisible(), "huvudbelöningen visas");
     ok(await sec.getByText("Valfri kaka 12 · Gratis kaffe 4", { exact: false }).isVisible(), "inlösta per belöning");
-    const selects = sec.locator("select"), inputs = sec.locator("input");
+    // Textfälten (belöningarnas text) och värdefälten (inputmode=numeric: huvudbelöningen först, sedan en per rad)
+    const selects = sec.locator("select"), inputs = sec.locator("input:not([inputmode=numeric])"), values = sec.locator("input[inputmode=numeric]");
     eq(await selects.count(), 1, "en mindre belöning");
     eq([await selects.nth(0).inputValue(), await inputs.nth(0).inputValue()], ["5", "Valfri kaka"], "befintlig belöning");
     eq((await selects.nth(0).locator("option").allInnerTexts()).slice(0, 2), ["1 stämpel", "2 stämplar"], "1 stämpel / 2 stämplar");
@@ -262,8 +263,10 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await selects.nth(1).selectOption("3");
     ok(await sec.getByText("Osparade ändringar").isVisible(), "osparade ändringar");
     await save.click();
-    await sec.getByText("Sparat").waitFor();
-    eq(state.calls.filter((c) => c.fn === "merchant_set_reward_tiers").at(-1).body.p_tiers, [{ at: 5, text: "Valfri kaka" }, { at: 3, text: "Kanelbulle" }], "skickar belöningarna");
+    await sec.getByText("Sparat", { exact: true }).waitFor();
+    const sent = state.calls.filter((c) => c.fn === "merchant_set_reward_tiers").at(-1).body;
+    eq(sent.p_tiers, [{ at: 5, text: "Valfri kaka", value_kr: null }, { at: 3, text: "Kanelbulle", value_kr: null }], "skickar belöningarna (tomma värden = null)");
+    ok("p_reward_value_kr" in sent && sent.p_reward_value_kr === null, "skickar alltid huvudbelöningens värde (null)");
     eq(await inputs.nth(0).inputValue(), "Kanelbulle", "sorterad efter sparning (3 först)");
     await add.click();
     ok(await add.isDisabled(), "högst 3");
@@ -276,6 +279,65 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await page.getByText("Lämna ut: Valfri kaka").waitFor();
     ok(true, "Lämna ut: Valfri kaka");
     eq(errors, [], "inga sidfel (belöningar)");
+    await ctx.close();
+  }
+
+  // 10b. Värde i kronor (sparat-räknaren): huvudbelöningen och varje mindre belöning
+  {
+    const { ctx, page, state, errors } = await open(browser, { mainValue: 39, tiers: [{ at: 5, text: "Valfri kaka", value_kr: 35 }] });
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Belöningar", exact: true }) });
+    await sec.getByText("En kaffe på huset").waitFor();
+    const main = sec.locator("#main-reward-value"), tier0 = sec.locator("#tier-value-0");
+    await page.waitForFunction(() => document.querySelector("#main-reward-value") && document.querySelector("#main-reward-value").value === "39");
+    eq([await main.inputValue(), await tier0.inputValue()], ["39", "35"], "värdena läses in");
+    ok(await sec.getByText("Värde i kronor", { exact: true }).isVisible(), "etikett: Värde i kronor");
+    ok(await sec.getByText("Värde (kr)", { exact: true }).isVisible(), "etikett: Värde (kr)");
+    ok(await sec.getByText("Värdet visas för kunden i appen", { exact: false }).isVisible(), "hjälptext om värdet");
+    eq(await main.getAttribute("placeholder"), "t.ex. 39", "platshållare");
+    const save = sec.getByRole("button", { name: "Spara belöningar" });
+    const calls = () => state.calls.filter((c) => c.fn === "merchant_set_reward_tiers");
+    ok(await save.isDisabled(), "inget ändrat: spara avstängd");
+    for (const bad of ["0", "10001", "3,5", "abc", "-5"]) {
+      await main.fill(bad);
+      ok(await sec.getByText("Ange ett heltal mellan 1 och 10 000.").first().isVisible() && await save.isDisabled(), "ogiltigt huvudvärde: " + bad);
+    }
+    await main.fill("42");
+    ok(await sec.getByText("Ange ett heltal mellan 1 och 10 000.").count() === 0 && !(await save.isDisabled()), "bara värdet ändrat: kan spara");
+    await tier0.fill("abc");
+    ok(await save.isDisabled(), "ogiltigt nivåvärde: spara avstängd");
+    await tier0.fill("");
+    await save.click();
+    await sec.getByText("Sparat", { exact: true }).waitFor();
+    eq(calls().at(-1).body.p_reward_value_kr, 42, "skickar 42");
+    eq(calls().at(-1).body.p_tiers, [{ at: 5, text: "Valfri kaka", value_kr: null }], "tömt nivåvärde = null");
+    eq([state.mainValue, await main.inputValue(), await tier0.inputValue()], [42, "42", ""], "laddas om efter sparning");
+    await main.fill("");
+    await save.click();
+    await page.waitForFunction(() => document.querySelector("#main-reward-value").value === "" );
+    await sec.getByText("Sparat", { exact: true }).waitFor();
+    eq(calls().at(-1).body.p_reward_value_kr, null, "tömt huvudvärde = null");
+    eq(state.mainValue, null, "inget värde sparat");
+    eq(errors, [], "inga sidfel (värden)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { forceInvalidValue: true });
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Belöningar", exact: true }) });
+    await sec.getByText("En kaffe på huset").waitFor();
+    await sec.locator("#main-reward-value").fill("39");
+    await sec.getByRole("button", { name: "Spara belöningar" }).click();
+    await sec.getByText("Ange ett heltal mellan 1 och 10 000.").waitFor();
+    ok(true, "serverns invalid_value visas vid huvudvärdet");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800, mainValue: 39, tiers: [{ at: 3, text: "Kanelbulle med kardemumma och pärlsocker", value_kr: 25 }, { at: 5, text: "Valfri kaka", value_kr: 35 }] });
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Belöningar", exact: true }) });
+    await sec.getByText("En kaffe på huset").waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "värden: ingen sidledsskroll vid 360 px (" + sw + ")");
+    const box = await sec.locator("#tier-value-1").boundingBox();
+    ok(box && box.x >= 0 && box.x + box.width <= 360, "värdefältet ryms vid 360 px");
     await ctx.close();
   }
   {
