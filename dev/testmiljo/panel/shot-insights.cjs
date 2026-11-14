@@ -1,0 +1,20 @@
+const { chromium } = require("playwright");
+const { mock } = require("./mock.cjs");
+(async () => {
+  const b = await chromium.launch();
+  const ctx = await b.newContext({ viewport: { width: 900, height: 1000 }, deviceScaleFactor: 2 });
+  await ctx.addInitScript(() => localStorage.setItem("tappass.merchant.session.v2", JSON.stringify({ token: "demo", cafeName: "Café Linnea", loginName: "linnea" })));
+  const p = await ctx.newPage();
+  await mock(p, {});
+  await p.goto("http://127.0.0.1:5174/?lang=sv");
+  const sec = (n) => p.locator("section", { has: p.getByRole("heading", { name: n, exact: true }) });
+  await sec("Insikter").getByText("21 av 48", { exact: false }).waitFor();
+  await sec("Vinn tillbaka").getByText("Kund #a41f · 14 besök").waitFor();
+  await sec("Månadsrapport").locator("select").waitFor();
+  await p.addStyleTag({ content: "header{position:static!important}" });
+  await p.waitForTimeout(1500);
+  await sec("Insikter").screenshot({ path: "vid/insikter.png" });
+  await sec("Vinn tillbaka").screenshot({ path: "vid/vinn.png" });
+  await sec("Månadsrapport").screenshot({ path: "vid/rapport.png" });
+  await b.close();
+})();

@@ -32,6 +32,20 @@ function clean(hours) {
   }
   return out;
 }
+// Svenskt datum k dagar bakåt ("YYYY-MM-DD")
+const daysAgo = (k) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() - k * 864e5));
+const monthKey = (k) => { const [y, m] = daysAgo(0).split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 - k, 1)); return d.toISOString().slice(0, 7); };
+// Månadsrapport: innevarande månad (pågår) och två till; föregående månad har andra siffror
+function monthReport(p) {
+  const months = [monthKey(0), monthKey(1), monthKey(2)];
+  const m = months.includes(p) ? p : months[0];
+  const i = months.indexOf(m);
+  const M = (month, k) => ({ month, stamps: [96, 84, 70, 0][k], extra_stamps: [7, 0, 2, 0][k], visits: [88, 79, 64, 0][k], customers: [41, 36, 30, 0][k],
+    new_customers: [12, 9, 30, 0][k], returning_customers: [29, 27, 0, 0][k], rewards: [6, 5, 0, 0][k], rewards_value_kr: [1234, 195, 0, 0][k],
+    rewards_unvalued: 0, busiest_dow: [6, 5, 6, null][k], busiest_hour: [10, 9, 11, null][k] });
+  return { month: m, complete: i > 0, months, current: M(m, i), previous: M(i + 1 < 3 ? months[i + 1] : monthKey(3), Math.min(i + 1, 3)) };
+}
+
 async function mock(page, opts = {}) {
   const state = {
     quiet: opts.quiet ?? [{ days: [1, 2, 3, 4, 5], from: "14:00", to: "16:00" }],
@@ -56,6 +70,26 @@ async function mock(page, opts = {}) {
     // v11: stamgäster — kunder per nivå senaste 12 månaderna
     guests: opts.guests ?? { brons: 34, silver: 12, guld: 3, customers: 128 },
     failGuests: !!opts.failGuests,
+    // v12: insikter, vinn tillbaka, månadsrapport
+    insights: opts.insights ?? {
+      customers_90d: 48, repeat_90d: 21, repeat_rate: 0.44, visits_90d: 133, median_gap_days: 9, gap_pairs: 85,
+      heatmap: [[1, 8, 3], [1, 9, 5], [1, 12, 4], [2, 8, 1], [2, 14, 1], [3, 9, 6], [4, 9, 4], [5, 9, 7], [5, 16, 3], [6, 10, 12], [6, 11, 9], [7, 11, 6]],
+      busiest: { dow: 6, hour: 10, stamps: 12 }, stamps_90d: 61, lapsed_count: 4,
+      tips: [{ key: "lapsed", count: 4 }, { key: "unclaimed", count: 2 }, { key: "quiet_day", dow: 2, share: 0.04 }, { key: "no_value" }],
+    },
+    failInsights: !!opts.failInsights,
+    lapsed: opts.lapsed ?? {
+      count: 4, eligible: 3, stamps_needed: 10, sent_60d: 5, returned_60d: 2,
+      customers: [
+        { customer_label: "Kund #a41f", visits: 14, last_visit: daysAgo(79), gap_days: 7, days_since: 79, card_stamps: 4, winback_at: null, eligible: true },
+        { customer_label: "Kund #7c02", visits: 9, last_visit: daysAgo(33), gap_days: 2, days_since: 33, card_stamps: 8, winback_at: null, eligible: true },
+        { customer_label: "Kund #e5d1", visits: 5, last_visit: daysAgo(31), gap_days: 1, days_since: 31, card_stamps: 2, winback_at: null, eligible: true },
+        { customer_label: "Kund #33b8", visits: 3, last_visit: daysAgo(45), gap_days: 12, days_since: 45, card_stamps: 3, winback_at: new Date(Date.now() - 10 * 864e5).toISOString(), eligible: false },
+      ],
+    },
+    failLapsed: !!opts.failLapsed,
+    failWinback: !!opts.failWinback,
+    report: opts.report ?? null,
   };
   await page.route("**/rest/v1/rpc/**", async (route) => {
     const fn = route.request().url().split("/rpc/")[1].split("?")[0];
@@ -118,6 +152,25 @@ async function mock(page, opts = {}) {
           { key: "silver", name: "Silver", visits: 10, customers: g.silver },
           { key: "guld", name: "Guld", visits: 25, customers: g.guld },
         ] });
+      }
+      case "merchant_insights":
+        if (state.failInsights) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "not found" }) });
+        return json({ ok: true, ...state.insights });
+      case "merchant_lapsed":
+        if (state.failLapsed) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ code: "PGRST202", message: "not found" }) });
+        return json({ ok: true, ...state.lapsed });
+      case "merchant_winback": {
+        if (state.failWinback) return json({ ok: false, error: "network" }, 300);
+        const now = new Date().toISOString();
+        let sent = 0;
+        state.lapsed = { ...state.lapsed, customers: state.lapsed.customers.map((c) => (c.eligible ? (sent++, { ...c, eligible: false, winback_at: now }) : c)) };
+        state.lapsed.eligible = 0;
+        state.lapsed.sent_60d += sent;
+        return json({ ok: true, sent, expires_at: new Date(Date.now() + 15 * 864e5).toISOString() }, 400);
+      }
+      case "merchant_month_report": {
+        const r = state.report || monthReport(body.p_month);
+        return json({ ok: true, ...r });
       }
       case "merchant_redeem_by_code":
         return json({ ok: true, code: body.p_code, carry_over: 0, tier_at: 5, reward: "Valfri kaka" }, 300);

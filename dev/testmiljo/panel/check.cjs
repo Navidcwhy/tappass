@@ -19,6 +19,7 @@ async function open(browser, { lang = "sv", width = 900, height = 1000, clock = 
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 200)); });
   if (clock) await page.clock.install();
   const state = await mock(page, mopts);
+  ctx.__state = state;
   await page.goto(URL_ + "?lang=" + lang);
   const title = lang === "sv" ? "Lugna timmar" : "Quiet hours";
   const section = page.locator("section", { has: page.getByRole("heading", { name: title, exact: true }) });
@@ -414,6 +415,137 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await page.clock.runFor(61000);
     await page.waitForTimeout(300);
     ok(state.calls.filter((c) => c.fn === "merchant_guest_levels").length > n0, "uppdateras efter 60 s");
+    await ctx.close();
+  }
+
+  // 12. Insikter, Vinn tillbaka och Månadsrapport (v12)
+  const secOf = (page, name) => page.locator("section", { has: page.getByRole("heading", { name, exact: true }) });
+  const MONTHS = ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"];
+  const sthlmYM = (k) => { const [y, m] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit" }).format(new Date()).split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 - k, 1)); return { y: d.getUTCFullYear(), m: d.getUTCMonth() }; };
+  {
+    const { ctx, page, errors } = await open(browser);
+    const ins = secOf(page, "Insikter");
+    await ins.getByText("21 av 48 kunder kom mer än en gång").waitFor();
+    const order = await page.evaluate(() => [...document.querySelectorAll("section h3")].map((h) => h.textContent));
+    const at = (n) => order.indexOf(n);
+    ok(at("Insikter") === at("Stamgäster") + 1 && at("Vinn tillbaka") === at("Insikter") + 1 && at("Månadsrapport") === at("Vinn tillbaka") + 1, "ordning: " + order.join(" / "));
+    ok(await ins.getByText("Senaste 90 dagarna. Ett besök = en dag med stämpel.").isVisible(), "insikter: förklaring");
+    await page.waitForTimeout(900);
+    const txt = (await ins.innerText()).replace(/\s+/g, " ");
+    ok(/44\s?%/.test(txt), "återkommande 44 %");
+    ok(txt.includes("9 dagar"), "typisk tid 9 dagar");
+    ok(txt.includes("133") && txt.includes("senaste 90 dagarna"), "besök 133");
+    ok(await ins.locator('[title="lördag kl. 10–11: 12 stämplingar"]').count() === 1, "värmekarta: cellens förklaring");
+    ok(await ins.locator('[title="måndag kl. 13–14: 0 stämplingar"]').count() === 1, "värmekarta: tom cell finns (timmarna 8–16)");
+    ok(txt.includes("Mest besök: lördagar kl. 10–11"), "mest besök");
+    for (const tip of ["4 stamgäster har inte kommit på ett tag. Ge dem en dubbelstämpel under Vinn tillbaka.",
+                       "2 kunder har fullt kort men har inte löst in. Påminn dem i kassan.",
+                       "Tisdagar är er lugnaste dag (4 % av besöken). Prova lugna timmar då – dubbla stämplar lockar fler.",
+                       "Ange belöningens värde i kronor under Belöningar, så ser kunderna vad de har sparat."])
+      ok(txt.includes(tip), "tips: " + tip.slice(0, 40));
+
+    // Vinn tillbaka
+    const wb = secOf(page, "Vinn tillbaka");
+    await wb.getByText("Kund #a41f · 14 besök").waitFor();
+    const wtxt = (await wb.innerText()).replace(/\s+/g, " ");
+    ok(/Brukar komma var 7:e dag · senast för 79 dagar sedan \(\d{1,2} \w+\.?\) · 4\/10 på kortet/.test(wtxt), "rad: vanlig tid, dagar sedan, kortet");
+    ok(wtxt.includes("Brukar komma varannan dag"), "varannan dag");
+    ok(wtxt.includes("Brukar komma var dag"), "var dag");
+    ok(/Dubbelstämpel skickad \d{1,2} \w+/.test(wtxt), "chip: skickad");
+    ok(wtxt.includes("Senaste 60 dagarna: 5 fick en dubbelstämpel, 2 har kommit tillbaka."), "utfall 60 dagar");
+    const give = wb.getByRole("button", { name: "Ge 3 kunder en dubbelstämpel" });
+    const sends = () => state0.calls.filter((c) => c.fn === "merchant_winback").length;
+    const state0 = ctx.__state;
+    await give.click();
+    await wb.getByText("Ge 3 kunder en dubbelstämpel som gäller i 14 dagar?").waitFor();
+    await wb.getByRole("button", { name: "Avbryt" }).click();
+    ok(await wb.getByText("Ge 3 kunder en dubbelstämpel som gäller i 14 dagar?").count() === 0, "avbryt stänger frågan");
+    await give.click();
+    await wb.getByRole("button", { name: "Ja, skicka" }).click();
+    await wb.getByText(/Klart! 3 kunder fick en dubbelstämpel som gäller t\.o\.m\. \d{1,2} \w+/).waitFor();
+    ok(true, "skickat: Klart!");
+    await wb.getByText("Alla i listan har redan fått en dubbelstämpel (högst en gång per 60 dagar).").waitFor();
+    ok(await wb.getByRole("button", { name: /dubbelstämpel/ }).first().isDisabled(), "knappen avstängd när ingen kan få");
+    ok((await wb.innerText()).includes("Senaste 60 dagarna: 8 fick en dubbelstämpel"), "utfallet uppdaterat");
+
+    // Månadsrapport
+    const mr = secOf(page, "Månadsrapport");
+    await mr.locator("select").waitFor();
+    const cur = sthlmYM(0), prev = sthlmYM(1);
+    const opts = await mr.locator("select option").allInnerTexts();
+    ok(opts[0].includes(MONTHS[cur.m] + " " + cur.y), "månader: " + opts.join(" | "));
+    ok(opts.join(" ").includes("pågår"), "innevarande månad: pågår");
+    const rtxt = () => mr.innerText().then((x) => x.replace(/\s+/g, " "));
+    await page.waitForTimeout(700);
+    let r = await rtxt();
+    ok(r.includes("Besök") && r.includes("88") && /\+11\s?% mot /.test(r) && r.includes(MONTHS[prev.m]), "besök 88, +11 % mot förra månaden");
+    ok(r.includes("12 nya · 29 återkommande"), "nya och återkommande");
+    ok(r.includes("+ 7 extra (dubbelstämplar och lugna timmar)"), "extra stämplar");
+    ok(/värde 1[\s  ]234 kr/.test(r), "värde med mellanslag: 1 234 kr");
+    ok(r.includes("lördagar kl. 10–11"), "mest besök i månaden");
+    await mr.locator("select").selectOption({ index: 1 });
+    await page.waitForTimeout(700);
+    r = await rtxt();
+    ok(r.includes("79") && r.includes("9 nya · 27 återkommande"), "byter månad");
+    const sent = ctx.__state.calls.filter((c) => c.fn === "merchant_month_report").at(-1).body.p_month;
+    eq(sent, `${prev.y}-${String(prev.m + 1).padStart(2, "0")}`, "skickar vald månad");
+    await page.evaluate(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
+    await mr.getByRole("button", { name: "Skriv ut / spara som PDF" }).click();
+    eq(await page.evaluate(() => window.__printed), 1, "skriv ut");
+    await page.emulateMedia({ media: "print" });
+    ok(await mr.isVisible() && !(await page.getByRole("heading", { name: "Belöningar", exact: true }).isVisible()), "utskrift: bara rapporten");
+    await page.emulateMedia({ media: "screen" });
+    eq(errors, [], "inga sidfel (insikter)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { insights: { customers_90d: 0, repeat_90d: 0, repeat_rate: null, visits_90d: 0, median_gap_days: null, gap_pairs: 0, heatmap: [], busiest: null, stamps_90d: 0, lapsed_count: 0, tips: [] },
+      lapsed: { count: 0, eligible: 0, stamps_needed: 10, sent_60d: 0, returned_60d: 0, customers: [] } });
+    const ins = secOf(page, "Insikter");
+    await ins.getByText("Inga besök än").waitFor();
+    await ins.getByText("Inga tips just nu – det ser bra ut.").waitFor();
+    const t = (await ins.innerText()).replace(/\s+/g, " ");
+    ok(t.includes("För lite data än") && t.includes("Inga tips just nu – det ser bra ut.") && !t.includes("Mest besök"), "tomt läge: insikter");
+    await secOf(page, "Vinn tillbaka").getByText("Ingen stamgäst har slutat komma just nu.").waitFor();
+    ok(!(await secOf(page, "Vinn tillbaka").innerText()).includes("Senaste 60 dagarna"), "tomt läge: vinn tillbaka");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failInsights: true, failLapsed: true });
+    await page.getByText("Belöningar", { exact: true }).waitFor();
+    await page.waitForTimeout(1200);
+    ok(await secOf(page, "Insikter").isVisible() && await secOf(page, "Vinn tillbaka").isVisible(), "fel: sektionerna finns kvar");
+    ok(await page.getByText("21 av 48").count() === 0, "fel: inga påhittade siffror");
+    ok(await secOf(page, "Månadsrapport").locator("select").isVisible(), "fel i insikter stoppar inte rapporten");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failWinback: true });
+    const wb = secOf(page, "Vinn tillbaka");
+    await wb.getByRole("button", { name: "Ge 3 kunder en dubbelstämpel" }).click();
+    await wb.getByRole("button", { name: "Ja, skicka" }).click();
+    await wb.getByText("Kunde inte skicka just nu. Försök igen.").waitFor();
+    ok(true, "fel vid utskick visas");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800 });
+    await secOf(page, "Insikter").getByText("21 av 48", { exact: false }).waitFor();
+    await secOf(page, "Vinn tillbaka").getByText("Kund #a41f · 14 besök").waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "insikter: ingen sidledsskroll vid 360 px (" + sw + ")");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en" });
+    const ins = secOf(page, "Insights");
+    await ins.getByText("21 of 48 customers came more than once").waitFor();
+    const t = (await ins.innerText()).replace(/\s+/g, " ");
+    ok(t.includes("Busiest: Saturdays 10:00–11:00") && t.includes("Tuesdays are your quietest day (4% of visits)."), "engelska: insikter");
+    await secOf(page, "Win back").getByRole("button", { name: "Give 3 customers a double stamp" }).waitFor();
+    ok(true, "engelska: vinn tillbaka");
+    await secOf(page, "Monthly report").locator("select").waitFor();
+    ok(true, "engelska: månadsrapport");
     await ctx.close();
   }
 

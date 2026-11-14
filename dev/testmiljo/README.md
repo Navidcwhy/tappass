@@ -26,7 +26,7 @@ npx jest -c jest.android.config.js && npx jest -c jest.ios.config.js
 npx expo export --platform web --output-dir webdist
 node dev/testmiljo/serve.js "$PWD/webdist" &     # http://localhost:8099
 node dev/testmiljo/rec3.js vid 'a=/t/miyabi-01?s=quiet&d=2600&now=2026-11-16T14:20@8'
-cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs && node test-v11-levels.mjs
+cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs && node test-v11-levels.mjs && node test-v12-insights.mjs
 ```
 
 ## Butikspanelen (tappass.se/m, Lovable) — `panel/`
