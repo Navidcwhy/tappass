@@ -6,7 +6,7 @@ Används i en **kopia** av repot, aldrig i själva appen (filerna här byggs int
 ## Innehåll
 - `app/__tests__/` — Jest-tester (jest-expo, react-test-renderer). 106 tester, android + ios (ett bara iOS).
 - `app/jest.*.config.js`, `app/jest.setup.js` — konfiguration och mockar (haptik, svg, ikoner, AsyncStorage).
-- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|stack|win|quiet|home …`,
+- `app/src/lib/*.web.js` — webbmockar: demoscenarier (`?s=full|redeem|tap|tiers|sparat|niva|stack|win|quiet|home …`,
   `&d=<ms>` innan tappet svarar), NFC och NFC-status för webbförhandsvisningen.
   `window.__tappassTag("miyabi-01")` simulerar att en stämpel hålls mot telefonen (`?s=tap`: Bryggan = fel stämpel).
 - `rec3.js` — spelar in klipp i 780×1688 (390×844 @2x) via Chromes screencast, med klick
@@ -26,7 +26,7 @@ npx jest -c jest.android.config.js && npx jest -c jest.ios.config.js
 npx expo export --platform web --output-dir webdist
 node dev/testmiljo/serve.js "$PWD/webdist" &     # http://localhost:8099
 node dev/testmiljo/rec3.js vid 'a=/t/miyabi-01?s=quiet&d=2600&now=2026-11-16T14:20@8'
-cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs
+cd dev/testmiljo/pgtest && npm i @electric-sql/pglite@0.3.16 && node test-v8-quiet.mjs && node test-v9-tap.mjs && node test-v10-tiers.mjs && node test-v11-levels.mjs
 ```
 
 ## Butikspanelen (tappass.se/m, Lovable) — `panel/`

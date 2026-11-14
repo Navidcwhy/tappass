@@ -24,6 +24,10 @@ const LABEL_V = { 3: "Kanelbulle", 5: "Valfri kaka", 10: "Gratis kaffe" };
 const VALUE_V = { 3: 25, 5: 35, 10: 39 };
 let svStamps = 10;
 let svRedeemed = [];
+// ?s=niva: stamgästnivåer (v11). Bryggan har 9 besök (senast i går) — tappet i dag blir
+// det 10:e → Silvergäst. Miyabi 27 besök (Guld), Café Linnea 4 (Brons).
+const sthlm = (ms) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
+const YESTERDAY = sthlm(Date.now() - 86400000);
 const CITIES = [{ city: "Stockholm", places: 3 }, { city: "Göteborg", places: 1 }];
 const OFFERS = [{ cafe: MIYABI, stamps: 5, is_new: false }, { cafe: BRYGGAN, stamps: 2, is_new: false }, { cafe: LINNEA, stamps: 0, is_new: true }];
 let claimed = false;
@@ -35,6 +39,7 @@ const D = Number(q.get("d") || 150);   // ms innan tappet "svarar" — låter he
 export async function tapToken() {
   await delay(D);
   if (S === "tiers") { tierStamps += 1; return { ok: true, cafe: LINNEA_T, stamps: tierStamps, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 }; }
+  if (S === "niva") return { ok: true, cafe: BRYGGAN_V, stamps: 3, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
   if (S === "full") return { ok: true, cafe: MIYABI, stamps: 7, complete: true, stamps_added: 2, bonus_applied: true, carry_over: 1 };
   if (S === "plus1") return { ok: true, cafe: MIYABI, stamps: 4, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
   if (S === "last") return { ok: true, cafe: MIYABI, stamps: 5, complete: false, stamps_added: 1, bonus_applied: false, carry_over: 0 };
@@ -96,6 +101,11 @@ export async function loadWallet() {
     { cafe: MIYABI_V, stamps: 3, pending: false, rewards_redeemed: 1, saved_kr: 89, rewards_unvalued: 0, bonus_expires_at: null },
     { cafe: BRYGGAN_V, stamps: 2, pending: false, rewards_redeemed: 3, saved_kr: 96, rewards_unvalued: 0, bonus_expires_at: null },
   ];
+  if (S === "niva") return [
+    { cafe: BRYGGAN_V, stamps: 2, pending: false, rewards_redeemed: 2, saved_kr: 64, rewards_unvalued: 0, visits_12m: 9, last_visit: YESTERDAY, bonus_expires_at: null },
+    { cafe: MIYABI_V, stamps: 3, pending: false, rewards_redeemed: 4, saved_kr: 356, rewards_unvalued: 0, visits_12m: 27, last_visit: YESTERDAY, bonus_expires_at: null },
+    { cafe: { ...LINNEA, reward_value_kr: 39 }, stamps: 6, pending: false, rewards_redeemed: 0, saved_kr: 0, rewards_unvalued: 0, visits_12m: 4, last_visit: YESTERDAY, bonus_expires_at: null },
+  ];
   if (S === "stack") return [
     { cafe: MIYABI, stamps: 6, pending: false, bonus_expires_at: null },
     { cafe: LINNEA, stamps: 8, pending: true, bonus_expires_at: null },
@@ -115,7 +125,7 @@ export async function loadWallet() {
   if (claimed) rows.push({ cafe: LINNEA, stamps: 0, pending: false, bonus_expires_at: midnight(3) });
   return rows;
 }
-export const loadCafes = async () => (S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
+export const loadCafes = async () => (S === "stack" ? [BRYGGAN, LINNEA, MIYABI, RAMEN, NONNA, BLOM, FIKA] : S === "sparat" ? [BRYGGAN_V, LINNEA_V, MIYABI_V] : S === "niva" ? [BRYGGAN_V, { ...LINNEA, reward_value_kr: 39 }, MIYABI_V] : [BRYGGAN, LINNEA, MIYABI]);
 export async function wheelStatus() {
   await delay(80);
   const base = { ok: true, can_spin: true, next_spin_at: midnight(1), today: null, prize: null, bonuses: [], cities: CITIES };

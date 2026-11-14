@@ -354,6 +354,69 @@ const setCalls = (state) => state.calls.filter((c) => c.fn === "merchant_set_qui
     await ctx.close();
   }
 
+  // 11. Stamgäster (v11): kunder per nivå, högsta först; tomt läge, fel, 360 px, engelska
+  {
+    const { ctx, page, state, errors } = await open(browser);
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Stamgäster", exact: true }) });
+    await sec.getByText("128 kunder har besökt er senaste 12 månaderna.").waitFor();
+    ok(await sec.getByText("en dag med stämpel räknas som ett besök", { exact: false }).isVisible(), "förklaring");
+    const order = await page.evaluate(() => [...document.querySelectorAll("section h3")].map((h) => h.textContent));
+    ok(order.indexOf("Stamgäster") === order.indexOf("Belöningar") + 1, "direkt efter Belöningar: " + order.join(" / "));
+    await page.waitForTimeout(900);   // talen räknas upp
+    const tiles = await sec.locator(".grid > div").allInnerTexts();
+    eq(tiles.map((x) => x.replace(/\s+/g, " ").trim()), ["GULD 3 från 25 besök", "SILVER 12 från 10 besök", "BRONS 34 från 3 besök"], "Guld, Silver, Brons med antal");
+    const calls = () => state.calls.filter((c) => c.fn === "merchant_guest_levels").length;
+    eq(calls(), 1, "hämtas en gång vid start");
+    eq(errors, [], "inga sidfel (stamgäster)");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { guests: { brons: 1, silver: 0, guld: 0, customers: 1 } });
+    await page.getByText("1 kund har besökt er senaste 12 månaderna.").waitFor();
+    ok(true, "singular: 1 kund");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { guests: { brons: 0, silver: 0, guld: 0, customers: 0 } });
+    await page.getByText("Inga besök registrerade senaste 12 månaderna än.").waitFor();
+    ok(await page.locator("section", { has: page.getByRole("heading", { name: "Stamgäster", exact: true }) }).locator(".grid").count() === 0, "tomt läge utan rutor");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { failGuests: true });
+    await page.getByText("Kunde inte hämta stamgästerna just nu.").waitFor();
+    ok(await page.getByText("Belöningar", { exact: true }).isVisible(), "resten av panelen fungerar utan v11");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { width: 360, height: 800 });
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Stamgäster", exact: true }) });
+    await sec.getByText("128 kunder", { exact: false }).waitFor();
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 360, "stamgäster: ingen sidledsskroll vid 360 px (" + sw + ")");
+    const boxes = await sec.locator(".grid > div").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+    ok(boxes.length === 3 && boxes[0] < boxes[1] && boxes[1] < boxes[2], "rutorna staplas på mobil");
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await open(browser, { lang: "en" });
+    const sec = page.locator("section", { has: page.getByRole("heading", { name: "Regulars", exact: true }) });
+    await sec.getByText("128 customers visited you in the last 12 months.").waitFor();
+    await page.waitForTimeout(900);
+    const tiles = await sec.locator(".grid > div").allInnerTexts();
+    eq(tiles.map((x) => x.replace(/\s+/g, " ").trim()), ["GOLD 3 from 25 visits", "SILVER 12 from 10 visits", "BRONZE 34 from 3 visits"], "engelska");
+    await ctx.close();
+  }
+  {
+    const { ctx, page, state } = await open(browser, { clock: true });
+    await page.getByText("128 kunder har besökt er senaste 12 månaderna.").waitFor();
+    const n0 = state.calls.filter((c) => c.fn === "merchant_guest_levels").length;
+    await page.clock.runFor(61000);
+    await page.waitForTimeout(300);
+    ok(state.calls.filter((c) => c.fn === "merchant_guest_levels").length > n0, "uppdateras efter 60 s");
+    await ctx.close();
+  }
+
   await browser.close();
   console.log("Panel OK:", passed, "kontroller");
 })().catch((e) => { console.error("FEL:", e.message); process.exit(1); });
