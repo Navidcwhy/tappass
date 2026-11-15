@@ -24,9 +24,11 @@
 
 ## Före första kedjan
 
-1. **Kör v18** efter v17 (`apply_migration`). Vakten kräver v17-läget för de 32 funktioner som skrivs om. Den jämför koden utan blanksteg.
-2. **Appuppdateringen** (OTA) med kedjestöd ska vara ute. Äldre appar visar ställena som egna rader under Ställen, med ställets egna belöningstexter.
-3. **Panelen** med huvudkontot ska vara publicerad (Lovable-utkastet).
+Allt är klart sedan 2026-11-15:
+
+1. **v18 är körd** i produktion (efter v17, i SQL Editor). Vakten krävde v17-läget för de 32 funktioner som skrivs om och jämförde koden utan blanksteg.
+2. **Appuppdateringen** (OTA `4ffdc2e1…`) med kedjestöd är ute. Telefoner som inte startat appen sedan dess visar ställena som egna rader under Ställen, med ställets egna belöningstexter.
+3. **Panelen** med huvudkontot är publicerad.
 
 ## Skapa en kedja
 
