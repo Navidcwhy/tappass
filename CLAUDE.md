@@ -138,7 +138,7 @@ eas build --profile development --platform ios
 npm start
 ```
 
-Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar (endast i dev-builds, `__DEV__`) skickar samma `tap_token`-anrop som en riktig tagg. De renderas aldrig i produktion.
+Utan fysisk NFC-tagg: appens "Simulera en disk"-knappar (endast i dev-builds, `__DEV__`, sedan `cef1e4c`) skickar samma `tap_token`-anrop som en riktig tagg. **Undantag:** Play-bygget (`6948a00`) byggdes utan `cef1e4c`. Telefoner som inte har fått någon OTA visar därför knapparna i produktion, en per aktivt ställe, och de skickar `<slug>-01` som en riktig stämpling (se Kända begränsningar).
 
 Nya butiker läggs in direkt i Supabase — inte i koden: `insert into cafes …` (sätt `city`, t.ex. `'Stockholm'` — annars kommer butiken inte med i Dagens hjul), sedan `select public.admin_issue_pin('<slug>');` som skapar tagg, inloggning och slumpad PIN. Se README-v5.md.
 
@@ -247,6 +247,12 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
 - `expiryText` i `wheel.js` använder telefonens tidszon: en telefon inställd på annan tidszon än svensk kan visa fel veckodag för "t.o.m. … 23.59". Medvetet kvar (låg påverkan); rätta genom att formatera i Europe/Stockholm om det behövs.
 - Ingen felrapportering från appen i fält: Expo Observe kräver betald EAS-plan och Play-kraschdata kräver en Google-tjänstekontonyckel i Expo.
 - Ingen test-/lint-infrastruktur; verifiering sker manuellt på fysisk enhet med NFC (JS-nivå kan sanity-checkas med babel-transform).
+- **Simulera-knapparna i Play-bygget (upptäckt 2026-11-16):**
+  - Play-bygget `6948a00` saknar spärren från `cef1e4c`. Varje aktivt ställe får därför en knapp som stämplar på riktigt (`<slug>-01`, en gång per väntetid) var kunden än är.
+  - OTA:n tar bort knapparna. Den nådde Navids Android 2026-11-16 efter två kallstarter: Tvinga stopp, öppna och vänta, sedan Tvinga stopp och öppna igen.
+  - Telefoner som inte startat om appen har kvar knapparna.
+  - Åtgärd som stänger hålet i alla versioner: ge taggarna slumpade koder (`<slug>-` + 8 tecken) och sätt `tags.active = false` på `<slug>-01` när den fysiska taggen är omskriven. Alla uppslag kräver `active = true`, och `admin_issue_pin` skapar bara en tagg när stället saknar en.
+  - Läge 2026-11-16: föreslaget, inväntar Navids ja.
 
 ## iOS-release
 
