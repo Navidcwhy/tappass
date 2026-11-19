@@ -253,6 +253,16 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
   - Bygge 6 (2026-10-05, kanal `production`, runtime 1.0.0) laddades upp till App Store Connect 2026-10-06 men publicerades aldrig.
   - Följden är att iPhone-användare har den gamla appen med Simulera-knapparna, och ingen OTA når dem.
   - Lösning: version 1.0.1 (app.json sedan 2026-11-19) byggs och släpps i App Store. Apple kräver en högre version än den godkända 1.0.0.
+  - **1.0.1 byggd 2026-11-19 via Expo-kopplingen (`build_run`):**
+    - iOS bygge 8 (`f0ee7db6`, ipa) från `a067689`.
+    - Android versionCode 6 (`3e7b191e`, aab) från `fdbf004`.
+    - Första iOS-försöket (`94b41c20`) stoppades i konfigurationssteget, eftersom `ascAppId` saknades vid automatisk inskickning. Det förbrukade byggnummer 7.
+    - `eas.json` har sedan PR #48 `ascAppId` 6786742127. ID:t kommer från `APP_STORE_URL` på tappass.se.
+    - Credentials hos EAS: distributionscertifikat och provisioneringsprofil gäller till juli 2027. App Store Connect-nyckeln finns.
+  - **Uppladdningen till App Store Connect stoppades av Apple** (`EAS_ASC_REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`): ett avtal saknas eller har gått ut.
+    - Kontoinnehavaren i Apple-kontot (Folde.AI AB, team `Y3BW6QGTQG`) godkänner avtalen i App Store Connect → Business, och vid behov Program License Agreement på developer.apple.com/account.
+    - Skicka sedan samma bygge igen med `build_submit` (`ascAppIdentifier` 6786742127). Inget nytt bygge behövs.
+  - **Android-AAB:n** laddas upp manuellt i Play Console, eftersom EAS saknar Google-tjänstekontonyckel.
   - Kvar för full iOS-funktion: AASA-fil på tappass.se (Universal Links) och URL-records i taggarna (bakgrundsläsning).
 - Typsnitt (Roboto Flex, 6 statiska instanser) är inbäddade i `assets/fonts` och laddas via `expo-font` vid start. Splash och adaptiv ikon-bakgrund i `app.json` är fortfarande `#F7F4EE` (native — ändras först vid nästa bygge).
 - `device_id`-identiteten överlever inte ominstallation — utom för kunder med konto (v14), som loggar in igen. (`getDeviceId` är single-flight sedan 2026-11-11 — samtidiga anrop vid första start får samma id.)
