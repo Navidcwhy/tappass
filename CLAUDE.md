@@ -259,9 +259,15 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
     - Första iOS-försöket (`94b41c20`) stoppades i konfigurationssteget, eftersom `ascAppId` saknades vid automatisk inskickning. Det förbrukade byggnummer 7.
     - `eas.json` har sedan PR #48 `ascAppId` 6786742127. ID:t kommer från `APP_STORE_URL` på tappass.se.
     - Credentials hos EAS: distributionscertifikat och provisioneringsprofil gäller till juli 2027. App Store Connect-nyckeln finns.
-  - **Uppladdningen till App Store Connect stoppades av Apple** (`EAS_ASC_REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`): ett avtal saknas eller har gått ut.
-    - Kontoinnehavaren i Apple-kontot (Folde.AI AB, team `Y3BW6QGTQG`) godkänner avtalen i App Store Connect → Business, och vid behov Program License Agreement på developer.apple.com/account.
-    - Skicka sedan samma bygge igen med `build_submit` (`ascAppIdentifier` 6786742127). Inget nytt bygge behövs.
+  - **Första uppladdningen stoppades av Apple** 2026-11-19 (`EAS_ASC_REQUIRED_AGREEMENTS_MISSING_OR_EXPIRED`), eftersom ett avtal saknades eller hade gått ut. Kontoinnehavaren i Apple-kontot (Folde.AI AB, team `Y3BW6QGTQG`) godkände avtalen 2026-11-20.
+  - **Bygge 8 finns i App Store Connect sedan 2026-11-20** (`build_submit` 68701bf9, ca 21.04).
+    - Apple skickade varningen ITMS-90725: bygget gjordes med iOS 26-SDK:t. Från april 2027 måste uppladdningar byggas med Xcode 27 (iOS 27-SDK) eller senare.
+    - Varningen stoppar inget nu. Före april 2027 behövs en byggbild med Xcode 27, och det kan kräva en uppgradering av Expo SDK. SDK 54 är sista med legacy arch, och nfc-manager v3 stöder inte New Architecture.
+  - **Nästa steg för iOS:**
+    - Testa i TestFlight som intern testare.
+    - Skapa version 1.0.1 i App Store Connect och välj bygge 8.
+    - Lägg in Nyheter-texten och granskningsanteckningar med en skärminspelning av ett tapp, eftersom granskaren saknar NFC-stämpel.
+    - Skicka till granskning.
   - **Android-AAB:n** laddas upp manuellt i Play Console, eftersom EAS saknar Google-tjänstekontonyckel.
   - Kvar för full iOS-funktion: AASA-fil på tappass.se (Universal Links) och URL-records i taggarna (bakgrundsläsning).
 - Typsnitt (Roboto Flex, 6 statiska instanser) är inbäddade i `assets/fonts` och laddas via `expo-font` vid start. Splash och adaptiv ikon-bakgrund i `app.json` är fortfarande `#F7F4EE` (native — ändras först vid nästa bygge).
