@@ -180,6 +180,9 @@ Testbutiken Bryggans Bageri (`bryggan`) raderades 2026-11-15.
 - **Kodrutans pollning:** `getCurrentSavedCode` returnerar `{ ok, code }` — bara `ok: true, code: null` betyder inlöst. Nätfel (`ok: false`) får aldrig stänga rutan.
 - **Android App Links:** `autoVerify`-filtret i `app.json` innehåller bara `https://tappass.se/t/` (snedstreck sist — annars matchar även `/terms`). `tappass://` har ett eget filter via `scheme`. `public/.well-known/assetlinks.json` på tappass.se (Lovable) måste innehålla Google Plays **appsigneringsnyckel** (SHA-256) — byggena laddas upp som AAB och signeras om av Play.
 - **Väntetid per butik (v5):** `cafes.stamp_cooldown_seconds` (10 s–24 h, standard 60 s) som butiken ändrar i tappass.se/m. `tap_token` svarar `error: "cooldown"` + `retry_after_seconds`/`retry_after_minutes`, och appen visar det som info. Appen ignorerar dessutom samma token inom 5 s (dubbelläsning). Statiska token är gissningsbara (`<slug>-01`): väntetiden bromsar fusk men stoppar inte den som anropar API:t hemifrån — därför dynamiska taggar (v17).
+  - **Läge 2026-11-22:** Jernet och Miyabi har båda 60 s.
+  - Länkar ger stämplar, både `https://tappass.se/t/<token>` och `tappass://t/<token>`. Den som har läst en taggadress, eller gissar `miyabi-01`, kan därför stämpla en gång i minuten hemifrån.
+  - Navid valde att inte ändra väntetiden, så butikerna ställer in den själva i panelen.
 - **Butiksinloggning (v5):** inloggningsnamn (`cafe_pins.login_name`, standard = slug, butiken kan byta) + 6-siffrig PIN ger en sessionsnyckel (30 dagar, hashad i `merchant_sessions`). Panelen sparar nyckeln, aldrig PIN:en. 10 fel PIN låser ny inloggning i 15 min; inloggade sessioner fungerar under spärren. PIN-byte loggar ut övriga enheter.
 - **Dagens hjul (v6, `supabase_migration_v6_dagens_hjul.sql`, körd i produktion 2026-11-04 via `apply_migration`):** utfall, snurrgräns (ett per enhet och svenskt dygn via `sthlm_today()`/`sthlm_midnight()`) och erbjudna ställen avgörs i `spin_wheel`; `claim_wheel_prize` godtar bara erbjudna ställen och högst en aktiv bonus per ställe. `wheel_spins` och `stamp_bonuses` har RLS utan klientåtkomst. Transaktionslås per enhet (`pg_advisory_xact_lock` på `tappass:tap:`/`tappass:wheel:` + device_id) stoppar dubbelsnurr och dubbla bonusar vid samtidiga anrop. Staden skickas med vid snurr men lagras aldrig. `stamps.source` är `'tap'` eller `'bonus'`: `merchant_stats`/`merchant_daily` räknar bara `'tap'`, bonusar redovisas i panelens sektion "Kampanjstämplar" (`merchant_campaign_stats`). Kortets antal = `carry_over` från senaste inlösen + stämplar efter den (`stamps_since_last_redeem`). `cafes.wheel_enabled = false` tar bort en butik ur hjulet.
 - **v8 (`supabase_migration_v8_lugna_timmar.sql`, körd i produktion 2026-11-13 via `apply_migration`, version `20261113213356`):** butiken väljer dagar och tider (svensk tid) då varje stämpling ger 2 stämplar. `cafes.quiet_hours` = `[{days:[1..7], from:"HH:MM", to:"HH:MM"}]` (högst 7, from < to, "24:00" tillåtet), rensas av `quiet_hours_clean` och kontrolleras av `quiet_hours_active(hours, at)` (båda stängda för klienter). `tap_token` lägger till en stämpel med `source = 'quiet'` och svarar `quiet_applied`; hjulets dubbelstämpel används inte samtidigt (sparas till nästa besök), så ett tapp ger högst 2. En trasig inställning stoppar aldrig en stämpling. Panelen: `merchant_get_quiet_hours` (tider, active_now, besök 30 d/totalt) och `merchant_set_quiet_hours`. `merchant_stats`/`merchant_daily` räknar fortfarande bara `'tap'`. Före körningen var produktionens `tap_token` identisk med v6-versionen (md5 på `prosrc`); efteråt stämmer alla fem funktionerna med PGlite-testet och data var orörd. Alla butiker har `quiet_hours = []` tills de väljer tider i panelen (inga tider = inget visas i appen). Panelens sektion "Lugna timmar" finns i ett Lovable-utkast som inte är publicerat (se "Butikspanelen (Lovable)").
@@ -229,6 +232,25 @@ Projekt `291764fb-25d9-4dbc-9667-de7b172ded18` ("TapPass: The Smart Stamp"); pan
   - Kampanjstämplar (v16): hjälptexten nämner Bjud in en vän; femte siffran "Nya kunder via inbjudan · 30 dagar" och "(totalt N)" i förklaringen från `merchant_invite_stats` — visas bara när anropet lyckas.
   - Kedjor (v18, commit `1213383`): rollen hämtas med `merchant_chain` (fel eller saknad funktion = vanligt ställe, allt som förut). Huvudkontot får sektionen "{kedjan} – hela kedjan" (summa + tabell per ställe, kort på mobil, var 60:e s) med "Visa" → `merchant_chain_view`; visningen hålls bara i React-state (aldrig localStorage), alla anrop och sektioner byter till dess token (`key` = token), list med "Tillbaka till hela kedjan", utgången visning → tillbaka till hela kedjan med notis (inte utloggning). Huvudkontot: lugna timmar och väntetid göms (ställs in per ställe), "Senast inlösta" visar stället. Ställe i kedja (och visningen): "· del av {kedjan}", belöningar och födelsedagspresent bara läsning (`managed_by_chain`), profilen utan belöningstexter och färg (skickas aldrig), visningen döljer byte av inloggningsnamn/PIN. Funktionstest: `check-chain.cjs` (69 kontroller) i testmiljön.
   - Lovable höjde själv `@lovable.dev/vite-tanstack-config` 2.26.5 → 2.27.1 och lade till en regel i `AGENTS.md` (panelfunktioner i `m.tsx` + `i18n.tsx`, inga migrationer).
+- **tappass.se efter iPhone-släppet:** utkastet `drft_01m7zw1ffdf6fvtbc2kaxs0qyb`, commit `00b87ad`, publicerades 2026-11-22. `accept_draft` gav projektets main `00b87ad`, alltså samma commit som granskades, och `deploy_project` hade id `6ed405e4…`. Navid godkände publiceringen i chatten. Ändringarna gäller sv och en, och diffen omfattar bara de åtta filerna nedan.
+  - **`src/lib/i18n.tsx`, iPhone:** Vanliga frågor och "Så funkar det" nämner App Store och knappen Skanna stämpel. Raden "Apple Wallet på väg" togs bort.
+  - **`src/lib/i18n.tsx`, borttagna påståenden:** låst skärm, push-erbjudanden och push-notiser, dataexport med ett klick, API och "ingen fuskrisk".
+    - Android läser NFC bara när skärmen är upplåst, enligt Androids dokumentation. Skriv därför aldrig "låst skärm" i marknadsföringen.
+    - De två raderna om låst skärm och push togs bort ur jämförelsetabellen.
+    - Ersättningarna beskriver funktioner som finns: Dagens hjul, delbelöningar, stamgästnivåer, lugna timmar, Vinn tillbaka, månadsrapport, insikter och ett stämpelkort för alla ställen.
+  - **`src/lib/i18n.tsx`, frågan om fusk:** frågan heter nu "Hur skyddar ni mot fusk?" och svarar inte längre "Nej". Svaret nämner väntetiden och panelen.
+  - **`src/lib/i18n.tsx`, övriga texter:**
+    - Inlösen beskrivs med butikens stämpel, och koden nämns som reserv. Det gäller "Så funkar det", "För dig" och butiksvyn.
+    - Igångsättningen säger att TapPass lägger upp namn och antal stämplar och att butiken fyller i resten i panelen.
+    - Butiksvyn säger "inloggningsnamn" i stället för "butiksnamn".
+    - Frågan om GDPR säger "kundernas data" i stället för "all data". Butikernas beställningar ligger i Lovable Cloud, och var den servern står är inte kontrollerat.
+  - **`src/routes/integritet.tsx` och `src/routes/radera-data.tsx`:** där stod Frankfurt, men kundernas data ligger i Stockholm (Supabase `eu-north-1`). Datumet "Senast uppdaterad" är 21 november 2026.
+  - **`src/routes/sv.tsx` och `src/routes/en.tsx`:** i JSON-LD står `operatingSystem: "Android, iOS"`.
+  - **`public/llms.txt`:** har fått avsnittet App med länkar till båda butikerna.
+  - **`src/lib/store-links.ts` och `src/routes/t.$.tsx`:** `sunQuery(search)` behåller bara `e` (eller `p`, som skrivs om till `e`) med 32 hex och `c` med 16 hex. Android-omdirigeringen och "Jag har redan appen" skickar nu med `?e=…&c=…`. Testat i Node (14 kontroller), även mot appens `sunFromQuery`.
+  - **Ej ändrat, Navids beslut behövs:**
+    - Sajten beskriver stämpeln som "massiv mahogny och mässing" med lasergraverad logga. Prototypen är 3D-printad.
+    - Sidan Radera din data säger att enhets-ID:t syns i appens inställningar, men appen visar det inte.
 
 ## Dagens hjul (byggt 2026-11-04)
 
@@ -275,7 +297,9 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
   - **App Store Connect på mobilen:** appens sidomeny öppnas med pilen bredvid rubriken "iOS App Version …". Där finns iOS App (+), App Information och Age Rating. Chrome behöver "Datorversion". ☰ öppnar huvudmenyn, och plustecknet vid "Apps" skapar en ny app.
   - **Android-AAB:n** laddas upp manuellt i Play Console, eftersom EAS saknar en Google-tjänstekontonyckel.
     - Så länge Play har 1.0.0 (runtime 1.0.0) når OTA från main ingen Android-telefon.
-  - Kvar för full iOS-funktion: AASA-fil på tappass.se (Universal Links) och URL-records i taggarna (bakgrundsläsning).
+  - **Kvar för full iOS-funktion:**
+    - AASA-filen finns i Lovable-projektet, men ingen har kontrollerat att en länk till tappass.se/t/… öppnar appen på en iPhone.
+    - Miyabis tagg är fortfarande en textrecord och behöver bli en URL-record för bakgrundsläsning. Jernets tagg har redan en URL-record.
 - Typsnitt (Roboto Flex, 6 statiska instanser) är inbäddade i `assets/fonts` och laddas via `expo-font` vid start. Splash och adaptiv ikon-bakgrund i `app.json` är fortfarande `#F7F4EE` (native — ändras först vid nästa bygge).
 - `device_id`-identiteten överlever inte ominstallation — utom för kunder med konto (v14), som loggar in igen. (`getDeviceId` är single-flight sedan 2026-11-11 — samtidiga anrop vid första start får samma id.)
 - `expiryText` i `wheel.js` använder telefonens tidszon: en telefon inställd på annan tidszon än svensk kan visa fel veckodag för "t.o.m. … 23.59". Medvetet kvar (låg påverkan); rätta genom att formatera i Europe/Stockholm om det behövs.
@@ -313,7 +337,10 @@ iOS Core NFC skiljer sig fundamentalt från Android. Läsningen sker i `src/lib/
 3. ✅ **`isEnabled()` hårdkodad `true` på iOS** (nfc-manager 3.17.2) — `useNfcStatus` pollar inte på iOS, och "Slå på NFC"-UI:t visas bara på Android.
 4. **Entitlement:** `com.apple.developer.nfc.readersession.formats` läggs till av config-pluginet vid prebuild. Med EAS-hanterade credentials synkas capability "NFC Tag Reading" automatiskt till app-ID:t vid `eas build`/`eas credentials`. `includeNdefEntitlement: false` är satt i `app.json` — Apple avvisar `NDEF`-värdet för appar byggda med iOS 26 SDK (fel 90778 vid processning).
 5. ✅ **Info.plist:** `NFCReaderUsageDescription` + `ITSAppUsesNonExemptEncryption: false` finns i `app.json` (`ios.infoPlist`).
-6. ⏳ **Universal Links:** `associatedDomains` (`applinks:tappass.se`) finns, men kräver att tappass.se (Lovable) serverar `/.well-known/apple-app-site-association` med rätt Team-ID + bundle-ID. Åtgärdas i Lovable-projektet.
+6. ⏳ **Universal Links:** `associatedDomains` (`applinks:tappass.se`) finns i appen.
+   - Lovable-projektet har `public/.well-known/apple-app-site-association` i det äldre formatet: `appID` `Y3BW6QGTQG.se.tappass.app` och `paths` `["/t/*"]`.
+   - `public/_headers` sätter `Content-Type: application/json` på filen.
+   - Ingen har kontrollerat att filen serveras rätt eller att Apples CDN har hämtat den, eftersom sandlådan inte når tappass.se. Testa på en iPhone: en länk till tappass.se/t/… ska öppna appen.
 7. ✅ **`AppLinkOnboarding.js` plattformsgrenad** — välkomstskärm följd av plattformssteg: iOS får Universal Links/skanna-innehåll i stället för Androids "öppna som standard". Visas bara vid första start (AsyncStorage-flagga via `prefs.js`) och kan öppnas igen via hjälpknappen i sidhuvudet.
 
 ### Byggkommandon
@@ -345,7 +372,7 @@ Första iOS-bygget frågar efter Apple-inloggning (eller App Store Connect API-n
 - [ ] Verifiera att app-ID:t `se.tappass.app` fått capabilities: NFC Tag Reading + Associated Domains (automatiskt om EAS hanterar credentials)
 - [ ] App-post i App Store Connect kopplad till `se.tappass.app` (metadata finns redan)
 - [ ] Efter `eas submit`: välj builden under versionen i App Store Connect, besvara exportkryptering (eller sätt `ITSAppUsesNonExemptEncryption: false` i `app.json` i förväg)
-- [ ] Se till att tappass.se serverar AASA-filen på `/.well-known/apple-app-site-association` (görs i Lovable-projektet, inte i detta repo)
+- [ ] Se till att tappass.se serverar AASA-filen på `/.well-known/apple-app-site-association`. Filen finns i Lovable-projektet. Det som återstår är att kontrollera på en iPhone att länkarna öppnar appen.
 - [ ] Skriv om fysiska NFC-taggar till URL-records (`https://tappass.se/t/<token>`) — krävs för att iOS bakgrundsläsning ska fungera alls
-- [ ] Dynamiska taggar (v17): "Jag har redan appen" på tappass.se/t/… ska skicka med frågesträngen (`tappass://t/<token>?e=…&c=…`), annars får iPhone utan AASA beskedet "Håll telefonen mot stämpeln" (görs i Lovable-projektet)
+- [x] Dynamiska taggar (v17): "Jag har redan appen" på tappass.se/t/… skickar med frågesträngen (`tappass://t/<token>?e=…&c=…`), och det gör Android-omdirigeringen också. Publicerat 2026-11-22 (`sunQuery` i Lovables `src/lib/store-links.ts`).
 - [x] App-ikon incheckad på `assets/icon.png` (1024×1024 PNG, ingen alfakanal)
