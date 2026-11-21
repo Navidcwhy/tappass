@@ -248,7 +248,7 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
 
 ## Kända begränsningar
 
-- **iOS (läge 2026-11-19):** App Store har **bygge 4**, version 1.0.0 från juli, enligt Navid i App Store Connect.
+- **iOS (läge 2026-11-21):** Apple godkände version 1.0.1 (bygge 8) 2026-11-21. Fram till släppet har App Store **bygge 4**, version 1.0.0 från juli.
   - Bygge 2–4 gjordes utan uppdateringskanal och runtime (`channel`/`runtimeVersion` null hos EAS), så de kan aldrig få OTA.
   - Bygge 6 (2026-10-05, kanal `production`, runtime 1.0.0) laddades upp till App Store Connect 2026-10-06 men publicerades aldrig.
   - Följden är att iPhone-användare har den gamla appen med Simulera-knapparna, och ingen OTA når dem.
@@ -263,12 +263,18 @@ Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens 
   - **Bygge 8 finns i App Store Connect sedan 2026-11-20** (`build_submit` 68701bf9, ca 21.04).
     - Apple skickade varningen ITMS-90725: bygget gjordes med iOS 26-SDK:t. Från april 2027 måste uppladdningar byggas med Xcode 27 (iOS 27-SDK) eller senare.
     - Varningen stoppar inget nu. Före april 2027 behövs en byggbild med Xcode 27, och det kan kräva en uppgradering av Expo SDK. SDK 54 är sista med legacy arch, och nfc-manager v3 stöder inte New Architecture.
+  - **Granskningen av 1.0.1:**
+    - Navid skapade versionen i App Store Connect med bygge 8 och skickade in den 2026-11-21 kl. 12.21 svensk tid. Inskickningens id är `50da74f5-1c6b-4f61-a68d-5accd69e17d1`.
+    - Apple godkände den samma dag. Mejlet kom 20.45 och säger "eligible for distribution".
+    - Inskickningen krävde två saker. Åldersfrågorna som Apple lade till 2026-11-16 (Shared Location, Dating and Relationships) måste besvaras vid varje uppdatering. Nyheter-texten krävs på alla språk, även English (U.S.).
+    - Bygget har samma JS som Android-OTA:n `4ffdc2e1…`, eftersom inget i `App.js`, `src` eller `assets` ändrades mellan `a6ecbe7` och `a067689`.
   - **Nästa steg för iOS:**
-    - Testa i TestFlight som intern testare.
-    - Skapa version 1.0.1 i App Store Connect och välj bygge 8.
-    - Lägg in Nyheter-texten och granskningsanteckningar med en skärminspelning av ett tapp, eftersom granskaren saknar NFC-stämpel.
-    - Skicka till granskning.
-  - **Android-AAB:n** laddas upp manuellt i Play Console, eftersom EAS saknar Google-tjänstekontonyckel.
+    - Släpp versionen. Vid manuell release står den som Pending Developer Release tills någon trycker **Release This Version**.
+    - Kontrollera sedan på en iPhone att appen har det nya utseendet och saknar Simulera-knappar.
+  - **OTA på iPhone:** bygge 8 har kanalen `production` och runtime 1.0.1. När 1.0.1 är installerad når `eas update --channel production` från main även iPhone. Det är första gången iPhone kan få OTA.
+  - **App Store Connect på mobilen:** appens sidomeny öppnas med pilen bredvid rubriken "iOS App Version …". Där finns iOS App (+), App Information och Age Rating. Chrome behöver "Datorversion". ☰ öppnar huvudmenyn, och plustecknet vid "Apps" skapar en ny app.
+  - **Android-AAB:n** laddas upp manuellt i Play Console, eftersom EAS saknar en Google-tjänstekontonyckel.
+    - Så länge Play har 1.0.0 (runtime 1.0.0) når OTA från main ingen Android-telefon.
   - Kvar för full iOS-funktion: AASA-fil på tappass.se (Universal Links) och URL-records i taggarna (bakgrundsläsning).
 - Typsnitt (Roboto Flex, 6 statiska instanser) är inbäddade i `assets/fonts` och laddas via `expo-font` vid start. Splash och adaptiv ikon-bakgrund i `app.json` är fortfarande `#F7F4EE` (native — ändras först vid nästa bygge).
 - `device_id`-identiteten överlever inte ominstallation — utom för kunder med konto (v14), som loggar in igen. (`getDeviceId` är single-flight sedan 2026-11-11 — samtidiga anrop vid första start får samma id.)
