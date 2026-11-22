@@ -252,6 +252,19 @@ Projekt `291764fb-25d9-4dbc-9667-de7b172ded18` ("TapPass: The Smart Stamp"); pan
     - Sajten beskriver stämpeln som "massiv mahogny och mässing" med lasergraverad logga. Prototypen är 3D-printad.
     - Sidan Radera din data säger att enhets-ID:t syns i appens inställningar, men appen visar det inte.
 
+## Butiksbilder (App Store och Google Play)
+
+- **Verktyget** ligger på grenen `verktyg/butiksbilder`, under `dev/butiksbilder`. README där beskriver körning och uppladdning.
+  - Det visar den riktiga appen i webbläsaren med påhittade ställen, och inga anrop når produktion.
+  - Det ger 6 bilder per språk (sv och en) för App Store (1320×2868) och Google Play (1080×1920).
+  - Det ger också två videor: förhandsvisningen för iPhone (886×1920) och en Android-video till YouTube-länken i Play.
+- **När:** gör om bilderna när appens utseende ändras märkbart, i samma veva som släppet. Vid 1.0.1 glömdes de bort.
+- **Läge 2026-11-22:** bilderna för 1.0.1 är gjorda och levererade till Navid men inte uppladdade.
+- **App Store:** bilderna går bara att byta i en version som går att redigera. Utan nytt bygge används Product Page Optimization: en behandling med de nya bilderna skickas till granskning och används sedan med Apply Treatment to Current Product Page.
+- **Google Play:** Butiksnärvaro → Huvudsaklig butiksinformation. Videon läggs in som en YouTube-länk.
+- **Demoställena** är påhittade: Café Blåklint, Bageri Glöd, Lunchkompaniet, Gröna Skålen och Glassbaren Maja. Sök på nya namn innan de används, så att de inte liknar riktiga ställen.
+- **Bildtexterna** lovar bara sådant appen gör. Det står inte "nära dig", eftersom appen inte använder platsen.
+
 ## Dagens hjul (byggt 2026-11-04)
 
 Gratis dagligt lyckohjul som ger dubbelstämplar. Design: kanvasens rad "Dagens hjul" (`K-Hjul-*`). Officiella regler: användarvillkoren på tappass.se (§ 5, 6 och 8 sedan 2026-11-14, då § 7 blev Bjud in en vän), butikernas åtagande i köpvillkoren (§ 5), datahantering i integritetspolicyn — alla uppdaterade 2026-11-04.
