@@ -1,0 +1,18 @@
+{
+  "name": "tappass-butiksbilder",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Skärmbilder och förhandsvideor till App Store och Google Play, tagna från riktiga appen i webbläsaren med påhittad data.",
+  "scripts": {
+    "bilder": "node shoot.cjs ios && node shoot.cjs android && node compose.cjs",
+    "video": "node video.cjs ios && node assemble.cjs ios && node video.cjs android && node assemble.cjs android",
+    "allt": "npm run bilder && npm run video",
+    "smoke": "node smoke.cjs"
+  },
+  "dependencies": {
+    "@fontsource/fraunces": "^5.3.0",
+    "@fontsource/schibsted-grotesk": "^5.3.0",
+    "@fontsource/space-mono": "^5.3.0",
+    "playwright": "1.63.0"
+  }
+}
