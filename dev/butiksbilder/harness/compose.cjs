@@ -129,10 +129,18 @@ function page({ W, H, os, slide, lang }) {
 
 (async () => {
   const browser = await chromium.launch();
+  // Tre storlekar för iPhone i App Store Connect (läge 2026-11-23):
+  // appstore    1320×2868  "iPhone with Dynamic Island (large display)", gäller 6,5"/6,7"/6,9"
+  // appstore-63 1206×2622  "iPhone with Dynamic Island (medium display)", 6,1"/6,3"
+  // appstore-65 1284×2778  "iPhone with Face ID (large display)", 6,5" (den gamla sidan använde bara den)
+  // ONLY=appstore-63,appstore-65 gör bara de valda.
+  const ONLY = (process.env.ONLY || "").split(",").filter(Boolean);
   const targets = [
     { store: "appstore", os: "ios", W: 1320, H: 2868 },
+    { store: "appstore-63", os: "ios", W: 1206, H: 2622 },
+    { store: "appstore-65", os: "ios", W: 1284, H: 2778 },
     { store: "play", os: "android", W: 1080, H: 1920 },
-  ];
+  ].filter((t) => !ONLY.length || ONLY.includes(t.store));
   for (const tg of targets) {
     const ctx = await browser.newContext({ viewport: { width: tg.W, height: tg.H }, deviceScaleFactor: 1 });
     const pg = await ctx.newPage();

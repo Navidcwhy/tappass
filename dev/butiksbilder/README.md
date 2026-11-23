@@ -10,7 +10,9 @@ Bilderna gjordes första gången 2026-11-22 från `eea3af8` (version 1.0.1).
 
 | Fil | Till | Format |
 |---|---|---|
-| `appstore/{sv,en}/01–06.png` | App Store, iPhone 6,9" | 1320×2868, PNG utan alfakanal |
+| `appstore/{sv,en}/01–06.png` | App Store, "iPhone with Dynamic Island (large display)" (6,5", 6,7" och 6,9") | 1320×2868, PNG utan alfakanal |
+| `appstore-63/{sv,en}/01–06.png` | App Store, "iPhone with Dynamic Island (medium display)" (6,1" och 6,3") | 1206×2622 |
+| `appstore-65/{sv,en}/01–06.png` | App Store, "iPhone with Face ID (large display)" (6,5") | 1284×2778 |
 | `play/{sv,en}/01–06.png` | Google Play, telefon | 1080×1920, PNG utan alfakanal |
 | `video/TapPass-forhandsvisning-iphone-886x1920.mp4` | App Store, förhandsvisning | 886×1920, 30 bilder/s, H.264 High, tyst AAC-spår, cirka 25 s |
 | `video/TapPass-video-android-1080x1920.mp4` | YouTube-länken i Google Play | 1080×1920, 30 bilder/s, cirka 25 s |
@@ -57,11 +59,16 @@ Ta bort kopian efteråt med `git worktree remove --force ../tappass-butiksbilder
 
 **App Store:** bilder och videor kan bara bytas i en version som går att redigera. Utan nytt bygge används Product Page Optimization:
 1. Create Test.
-2. Lägg de nya bilderna och videon i en behandling, för sv och en.
-3. Submit for Review.
+2. Öppna behandlingens Media Manager och fyll alla tre iPhone-platserna med bilder och video, för sv och en.
+   - Den gamla sidan hade bara "iPhone with Face ID (large display)". Behandlingen får en kopia av den, så töm den först med Remove All.
+   - En tom plats står som "Using Existing Assets" och kan visa de gamla bilderna. Fyll därför alla tre.
+   - Videon (886×1920) går in på alla tre platserna.
+3. Start Test → Add for Review → Submit for Review. Granskningen tar upp till 48 timmar.
 4. När Apple har godkänt testet: Apply Treatment to Current Product Page och välj versionen.
 
 Bara bilder och videor följer med, inte ikonen. En behandling per test, och steget kan inte ångras.
+
+Den inbyggda webbläsaren i Claude-appen kan inte välja filer. Filerna hämtades därför i sidan från raw.githubusercontent.com och lades i filfältet med `DataTransfer`. Rätt plats och ordning syns på filnamnen i `aria-label` på varje bild i Media Manager.
 
 **Google Play:**
 1. Butiksnärvaro → Huvudsaklig butiksinformation.
