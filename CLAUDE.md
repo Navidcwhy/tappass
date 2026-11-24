@@ -259,14 +259,16 @@ Projekt `291764fb-25d9-4dbc-9667-de7b172ded18` ("TapPass: The Smart Stamp"); pan
   - Det ger 6 bilder per språk (sv och en) för Google Play (1080×1920) och för de tre iPhone-platserna i App Store: 1320×2868, 1206×2622 och 1284×2778.
   - Det ger också två videor: förhandsvisningen för iPhone (886×1920) och en Android-video till YouTube-länken i Play.
 - **När:** gör om bilderna när appens utseende ändras märkbart, i samma veva som släppet. Vid 1.0.1 glömdes de bort.
-- **Läge 2026-11-23:**
-  - **Google Play:** de svenska telefonbilderna 01–06 ersatte de 7 gamla och skickades till granskning tillsammans med Android 1.0.1 (se Kända begränsningar). Listan finns bara på svenska (sv-SE), så de engelska Play-bilderna används inte. AI-deklarationen är "Don't label assets", eftersom bilderna är riktiga skärmbilder och inte genererade. Beskrivningen säger fortfarande "Lös in din belöning med en enkel kod i kassan"; koden finns kvar som reserv.
-  - **App Store:** skickade till granskning 2026-11-23 ca 14.19 med Product Page Optimization. Status: Waiting for Review, och granskningen tar upp till 48 timmar.
-    - Testet heter "Nya bilder 1.0.1" och har id `108dcada-05c3-404a-a360-b2adbd40c3e8`. Det har en behandling (A) för sv och en, och den visas för 50 % av besökarna tills den tillämpas.
-    - Behandlingen har nya bilder 01–06 och förhandsvideon på alla tre iPhone-platserna: "iPhone with Dynamic Island (large display)" (1320×2868, gäller 6,5", 6,7" och 6,9"), "Dynamic Island (medium display)" (1206×2622) och "Face ID (large display)" (1284×2778). De gamla bilderna på Face ID-platsen togs bort.
-    - **Nästa steg** när Apple har godkänt: öppna testet, välj Apply Treatment to Current Product Page och välj 1.0.1. Då ersätts bilderna för alla och testet tar slut.
+- **Läge 2026-11-24:**
+  - **Google Play:** de svenska telefonbilderna 01–06 ersatte de 7 gamla och skickades till granskning 2026-11-23 tillsammans med Android 1.0.1 (se Kända begränsningar). Listan finns bara på svenska (sv-SE), så de engelska Play-bilderna används inte. AI-deklarationen är "Don't label assets", eftersom bilderna är riktiga skärmbilder och inte genererade. Beskrivningen säger fortfarande "Lös in din belöning med en enkel kod i kassan"; koden finns kvar som reserv.
+  - **App Store:** de nya bilderna och förhandsvideon gäller för alla besökare sedan 2026-11-24, på sv och en. De lades in med Product Page Optimization.
+    - Testet heter "Nya bilder 1.0.1" och har id `108dcada-05c3-404a-a360-b2adbd40c3e8`.
+    - Testet skickades till granskning 2026-11-23 ca 14.19, och Apple godkände det (inskickning `48746b78-10ba-484a-a620-c360bfd74d9e`). Testet startade av sig självt 2026-11-24 och visade då behandlingen för 50 % av besökarna.
+    - Navid tillämpade behandlingen 2026-11-24 ca 12.10 i App Store Connect i mobilen. Knappen heter Apply Treatment A och sitter på testets sida, och han valde version 1.0.1. Testet stoppades då automatiskt.
+    - Behandlingen hade nya bilder 01–06 och förhandsvideon på alla tre iPhone-platserna: "iPhone with Dynamic Island (large display)" (1320×2868, gäller 6,5", 6,7" och 6,9"), "Dynamic Island (medium display)" (1206×2622) och "Face ID (large display)" (1284×2778). De gamla bilderna på Face ID-platsen togs bort.
+    - Ingen har kontrollerat butikssidan på apps.apple.com efteråt.
     - Navid loggade in i App Store Connect i den inbyggda webbläsaren med sitt Apple-ID. Han skriver lösenordet själv.
-  - **Videorna:** iPhone-videon ligger i behandlingen. Android-videon är inte uppladdad, eftersom den behöver ligga på YouTube.
+  - **Videorna:** iPhone-videon ligger på App Store-sidan. Android-videon är inte uppladdad, eftersom den behöver ligga på YouTube.
   - Alla levererade filer ligger på grenen `leverans/butiksbilder-1.0.1`.
 - **App Store:** bilderna går bara att byta i en version som går att redigera. Utan nytt bygge används Product Page Optimization: en behandling med de nya bilderna skickas till granskning och används sedan med Apply Treatment to Current Product Page.
 - **Google Play:** Butiksnärvaro → Huvudsaklig butiksinformation. Videon läggs in som en YouTube-länk.
